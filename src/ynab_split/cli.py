@@ -85,18 +85,15 @@ def draft(
             return
 
         selected_settlement = settlements[selected_idx]
-        previous_settlement = (
-            settlements[selected_idx + 1]
-            if selected_idx + 1 < len(settlements)
-            else None
-        )
+        # Next settlement is the one BEFORE this in the list (list is sorted newest first)
+        next_settlement = settlements[selected_idx - 1] if selected_idx > 0 else None
 
-        # Fetch expenses for selected settlement
+        # Fetch expenses AFTER selected settlement (up to next settlement or today)
         console.print(
-            f"\n[bold blue]Fetching expenses for settlement on {selected_settlement.date.date()}...[/bold blue]"
+            f"\n[bold blue]Fetching expenses after {selected_settlement.date.date()}...[/bold blue]"
         )
         expenses = service.fetch_expenses_for_settlement(
-            selected_settlement, previous_settlement
+            selected_settlement, next_settlement
         )
 
         if not expenses:
@@ -334,18 +331,15 @@ def apply(
             return
 
         selected_settlement = settlements[selected_idx]
-        previous_settlement = (
-            settlements[selected_idx + 1]
-            if selected_idx + 1 < len(settlements)
-            else None
-        )
+        # Next settlement is the one BEFORE this in the list (list is sorted newest first)
+        next_settlement = settlements[selected_idx - 1] if selected_idx > 0 else None
 
-        # Fetch expenses for selected settlement
+        # Fetch expenses AFTER selected settlement (up to next settlement or today)
         console.print(
-            f"\n[bold blue]Fetching expenses for settlement on {selected_settlement.date.date()}...[/bold blue]"
+            f"\n[bold blue]Fetching expenses after {selected_settlement.date.date()}...[/bold blue]"
         )
         expenses = service.fetch_expenses_for_settlement(
-            selected_settlement, previous_settlement
+            selected_settlement, next_settlement
         )
 
         if not expenses:
@@ -486,18 +480,15 @@ def fix_import_id(
             return
 
         selected_settlement = settlements[selected_idx]
-        previous_settlement = (
-            settlements[selected_idx + 1]
-            if selected_idx + 1 < len(settlements)
-            else None
-        )
+        # Next settlement is the one BEFORE this in the list (list is sorted newest first)
+        next_settlement = settlements[selected_idx - 1] if selected_idx > 0 else None
 
-        # Fetch expenses for selected settlement
+        # Fetch expenses AFTER selected settlement (up to next settlement or today)
         console.print(
-            f"\n[bold blue]Fetching expenses for settlement on {selected_settlement.date.date()}...[/bold blue]"
+            f"\n[bold blue]Fetching expenses after {selected_settlement.date.date()}...[/bold blue]"
         )
         expenses = service.fetch_expenses_for_settlement(
-            selected_settlement, previous_settlement
+            selected_settlement, next_settlement
         )
 
         if not expenses:
