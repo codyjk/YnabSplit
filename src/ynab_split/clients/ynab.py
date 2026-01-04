@@ -3,6 +3,7 @@
 import hashlib
 import logging
 from datetime import timedelta
+from typing import cast
 
 import httpx
 
@@ -205,6 +206,90 @@ class YnabClient:
         import_id = f"YS-{hash_str}-{draft.settlement_date.isoformat()}"
 
         return import_id
+
+    def get_transaction_by_import_id(
+        self, budget_id: str, import_id: str, since_date: str
+    ) -> object | None:
+        """
+        Get a transaction by its import_id.
+
+        Args:
+            budget_id: The YNAB budget ID
+            import_id: The import_id to search for
+            since_date: ISO date string to limit search
+
+        Returns:
+            Transaction object if found, None otherwise
+        """
+        try:
+            response = self.client.get(
+                f"/budgets/{budget_id}/transactions",
+                params={"since_date": since_date},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            transactions: list[object] = cast(
+                list[object], data.get("data", {}).get("transactions", [])
+            )
+
+            for transaction in transactions:
+                tx_dict = cast(dict[str, object], transaction)
+                if tx_dict.get("import_id") == import_id:
+                    return transaction
+
+            return None
+
+        except httpx.HTTPError as e:
+            logger.warning(f"Error fetching transaction by import_id: {e}")
+            return None
+
+    def update_transaction_import_id(
+        self, budget_id: str, transaction_id: str, new_import_id: str
+    ) -> bool:
+        """
+        Update a transaction's import_id.
+
+        Args:
+            budget_id: The YNAB budget ID
+            transaction_id: The transaction ID to update
+            new_import_id: The new import_id value
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # YNAB API requires updating the full transaction
+            # First, get the current transaction
+            response = self.client.get(
+                f"/budgets/{budget_id}/transactions/{transaction_id}"
+            )
+            response.raise_for_status()
+            current_transaction = response.json()["data"]["transaction"]
+
+            # Update only the import_id field
+            current_transaction["import_id"] = new_import_id
+
+            # PUT the updated transaction
+            response = self.client.put(
+                f"/budgets/{budget_id}/transactions/{transaction_id}",
+                json={"transaction": current_transaction},
+            )
+            response.raise_for_status()
+
+            logger.info(
+                f"Successfully updated transaction {transaction_id} "
+                f"with import_id: {new_import_id}"
+            )
+            return True
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"YNAB API error updating import_id: {e}")
+            logger.error(f"Response body: {e.response.text}")
+            return False
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error updating import_id: {e}")
+            return False
 
     def transaction_exists(
         self, budget_id: str, draft: ClearingTransactionDraft

@@ -194,99 +194,32 @@ class SplitwiseClient:
         self, group_id: int, user_id: int
     ) -> tuple[list[SplitwiseExpense], str]:
         """
-        Get all expenses since the last settlement, with auto-detection.
+        Get all expenses since the last settlement.
 
-        Auto-detects whether to use:
-        - Pre-settlement mode: Expenses since last settlement (balance exists)
-        - Post-settlement mode: Expenses between last 2 settlements (just settled)
+        Simple approach: Always fetch expenses since the last settlement date.
+        Duplicate prevention is handled by YNAB's deterministic import_id system.
 
         Args:
             group_id: The Splitwise group ID
-            user_id: The user ID
+            user_id: The user ID (unused but kept for API compatibility)
 
         Returns:
             Tuple of (expenses, mode description)
         """
-        logger.info("=== ENTERING get_expenses_since_last_settlement ===")
+        logger.info("Fetching expenses since last settlement")
 
-        # Get settlement history
-        settlements = self.get_settlement_history(group_id, count=2)
-        logger.info(f"Found {len(settlements)} settlements in history")
+        # Get the last settlement date
+        last_settlement_date = self.get_last_settlement_date(group_id, user_id)
 
-        if not settlements:
+        if not last_settlement_date:
             # No settlements ever - get all expenses
             logger.info("No settlements found, fetching all expenses")
             expenses = self.get_expenses(group_id=group_id, limit=1000)
             regular_expenses = [exp for exp in expenses if not exp.payment]
             return regular_expenses, "all time (no previous settlements)"
 
-        last_settlement = settlements[0]
-        last_settlement_date = last_settlement.date.date()
-        logger.info(
-            f"Last settlement ID: {last_settlement.id}, date: {last_settlement_date}"
-        )
-
-        # Check if settlement is recent (within 48 hours)
-        days_since_settlement = (datetime.now().date() - last_settlement_date).days
-        is_recent = days_since_settlement <= 2
-
-        logger.info(
-            f"Last settlement: {last_settlement_date} "
-            f"({days_since_settlement} days ago, recent={is_recent})"
-        )
-
-        if is_recent:
-            # Calculate current balance since last settlement
-            balance = self.calculate_current_balance(
-                group_id, user_id, since_date=last_settlement_date
-            )
-
-            logger.info(f"Current balance since settlement: ${balance:.2f}")
-
-            # Use post-settlement mode if:
-            # 1. Balance is near zero (within $1), OR
-            # 2. Settlement was TODAY (can't distinguish same-day expenses from new ones)
-            is_balance_zero = abs(balance) < Decimal("1.00")
-            is_settlement_today = days_since_settlement == 0
-
-            if is_balance_zero or is_settlement_today:
-                reason = (
-                    f"balance ≈ $0 (${balance:.2f})"
-                    if is_balance_zero
-                    else "settlement was today (same-day expenses)"
-                )
-                logger.info(
-                    f"Post-settlement mode detected: "
-                    f"recent settlement on {last_settlement_date}, {reason}"
-                )
-
-                # Fetch expenses between last 2 settlements
-                if len(settlements) >= 2:
-                    previous_settlement_date = settlements[1].date.date()
-                    expenses = self.get_expenses(
-                        group_id=group_id,
-                        dated_after=previous_settlement_date,
-                        dated_before=last_settlement_date,
-                        limit=1000,
-                    )
-                else:
-                    # Only one settlement exists, get everything before it
-                    expenses = self.get_expenses(
-                        group_id=group_id,
-                        dated_before=last_settlement_date,
-                        limit=1000,
-                    )
-
-                regular_expenses = [exp for exp in expenses if not exp.payment]
-                return (
-                    regular_expenses,
-                    f"between settlements (settled on {last_settlement_date})",
-                )
-
-        # Pre-settlement mode: get expenses since last settlement
-        logger.info(
-            f"Pre-settlement mode: fetching expenses since {last_settlement_date}"
-        )
+        # Simple: always fetch expenses since last settlement
+        logger.info(f"Fetching expenses since last settlement: {last_settlement_date}")
         expenses = self.get_expenses(
             group_id=group_id,
             dated_after=last_settlement_date,
@@ -294,4 +227,8 @@ class SplitwiseClient:
         )
 
         regular_expenses = [exp for exp in expenses if not exp.payment]
-        return regular_expenses, f"since {last_settlement_date} (pending settlement)"
+        logger.info(
+            f"Found {len(regular_expenses)} expenses since {last_settlement_date}"
+        )
+
+        return regular_expenses, f"since {last_settlement_date}"
