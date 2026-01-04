@@ -235,14 +235,27 @@ class YnabClient:
             response.raise_for_status()
             data = response.json()
 
+            transactions = data.get("data", {}).get("transactions", [])
+            logger.info(
+                f"Checking YNAB for import_id: {import_id} "
+                f"(found {len(transactions)} transactions since {since_date})"
+            )
+
             # Check if any transaction has this import_id
-            for transaction in data.get("data", {}).get("transactions", []):
-                if transaction.get("import_id") == import_id:
+            for transaction in transactions:
+                tx_import_id = transaction.get("import_id")
+                if tx_import_id == import_id:
                     logger.info(
                         f"Found existing transaction in YNAB with import_id: {import_id}"
                     )
                     return True
+                elif tx_import_id and tx_import_id.startswith("YS-"):
+                    logger.debug(
+                        f"Found YS transaction but different ID: {tx_import_id} "
+                        f"(date: {transaction.get('date')})"
+                    )
 
+            logger.info(f"No matching transaction found for import_id: {import_id}")
             return False
 
         except httpx.HTTPError as e:
