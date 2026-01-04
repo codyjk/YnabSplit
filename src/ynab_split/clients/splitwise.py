@@ -211,15 +211,20 @@ class SplitwiseClient:
 
         # Get settlement history
         settlements = self.get_settlement_history(group_id, count=2)
+        logger.info(f"Found {len(settlements)} settlements in history")
 
         if not settlements:
             # No settlements ever - get all expenses
+            logger.info("No settlements found, fetching all expenses")
             expenses = self.get_expenses(group_id=group_id, limit=1000)
             regular_expenses = [exp for exp in expenses if not exp.payment]
             return regular_expenses, "all time (no previous settlements)"
 
         last_settlement = settlements[0]
         last_settlement_date = last_settlement.date.date()
+        logger.info(
+            f"Last settlement ID: {last_settlement.id}, date: {last_settlement_date}"
+        )
 
         # Check if settlement is recent (within 48 hours)
         days_since_settlement = (datetime.now().date() - last_settlement_date).days
