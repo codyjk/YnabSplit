@@ -222,13 +222,21 @@ class SplitwiseClient:
         last_settlement_date = last_settlement.date.date()
 
         # Check if settlement is recent (within 48 hours)
-        is_recent = (datetime.now().date() - last_settlement_date).days <= 2
+        days_since_settlement = (datetime.now().date() - last_settlement_date).days
+        is_recent = days_since_settlement <= 2
+
+        logger.info(
+            f"Last settlement: {last_settlement_date} "
+            f"({days_since_settlement} days ago, recent={is_recent})"
+        )
 
         if is_recent:
             # Calculate current balance since last settlement
             balance = self.calculate_current_balance(
                 group_id, user_id, since_date=last_settlement_date
             )
+
+            logger.info(f"Current balance since settlement: ${balance:.2f}")
 
             # If balance is near zero (within $1), we're in post-settlement mode
             if abs(balance) < Decimal("1.00"):
