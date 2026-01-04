@@ -245,21 +245,12 @@ class SplitwiseClient:
 
             logger.info(f"Current balance since settlement: ${balance:.2f}")
 
-            # Use post-settlement mode if:
-            # 1. Balance is near zero (within $1), OR
-            # 2. Settlement was TODAY (can't distinguish same-day expenses from new ones)
-            is_balance_zero = abs(balance) < Decimal("1.00")
-            is_settlement_today = days_since_settlement == 0
-
-            if is_balance_zero or is_settlement_today:
-                reason = (
-                    f"balance ≈ $0 (${balance:.2f})"
-                    if is_balance_zero
-                    else "settlement was today (same-day expenses)"
-                )
+            # If balance is near zero (within $1), we're in post-settlement mode
+            if abs(balance) < Decimal("1.00"):
                 logger.info(
-                    f"Post-settlement mode detected: "
-                    f"recent settlement on {last_settlement_date}, {reason}"
+                    "Post-settlement mode detected: "
+                    f"recent settlement on {last_settlement_date}, "
+                    f"balance ≈ $0 (${balance:.2f})"
                 )
 
                 # Fetch expenses between last 2 settlements
