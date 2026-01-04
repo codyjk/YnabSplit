@@ -1,6 +1,7 @@
 """Expense categorization with cache-first logic."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .clients.openai_client import CategoryClassifier
 from .mapper import CategoryMapper
@@ -83,9 +84,10 @@ class ExpenseCategorizer:
         self, split_lines: list[ProposedSplitLine]
     ) -> list[ProposedSplitLine]:
         """
-        Categorize all split lines in a draft.
+        Categorize all split lines with parallel GPT calls.
 
         This mutates the split lines by adding category information.
+        Cache hits are processed synchronously, GPT calls are parallelized.
 
         Args:
             split_lines: List of proposed split lines
@@ -93,27 +95,81 @@ class ExpenseCategorizer:
         Returns:
             The same list with category_id and confidence populated
         """
+        # First pass: check cache for all items
+        uncached_lines = []
         for split_line in split_lines:
-            category_id, confidence, from_cache = self.categorize_split_line(split_line)
-
-            # Find category name
-            category_name = None
-            for cat in self.categories:
-                if cat.id == category_id:
-                    category_name = f"{cat.category_group_name} > {cat.name}"
-                    break
-
-            # Update split line
-            split_line.category_id = category_id
-            split_line.category_name = category_name
-            split_line.confidence = confidence
-
-            # Flag for review if confidence is low
-            if confidence is not None and confidence < 0.9:
-                split_line.needs_review = True
-                logger.warning(
-                    f"Low confidence ({confidence:.2f}) for '{split_line.memo}', "
-                    f"flagged for review"
+            cached = self.mapper.get_cached_mapping(split_line.memo)
+            if cached:
+                # Cache hit - apply immediately
+                self._apply_categorization(
+                    split_line, cached.ynab_category_id, cached.confidence
                 )
+            else:
+                # Cache miss - queue for GPT
+                uncached_lines.append(split_line)
+
+        # Second pass: parallelize GPT calls for uncached items
+        if uncached_lines:
+            logger.info(
+                f"Categorizing {len(uncached_lines)} expenses with GPT (parallel)"
+            )
+
+            # Use ThreadPoolExecutor for parallel API calls
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                # Submit all GPT classification tasks
+                future_to_line = {
+                    executor.submit(
+                        self.classifier.classify_expense,
+                        split_line.memo,
+                        None,
+                        self.categories,
+                    ): split_line
+                    for split_line in uncached_lines
+                }
+
+                # Process results as they complete
+                for future in as_completed(future_to_line):
+                    split_line = future_to_line[future]
+                    try:
+                        result = future.result()
+
+                        # Apply categorization
+                        self._apply_categorization(
+                            split_line, result.category_id, result.confidence
+                        )
+
+                        # Save to cache
+                        self.mapper.save_mapping(
+                            description=split_line.memo,
+                            category_id=result.category_id,
+                            source="gpt",
+                            confidence=result.confidence,
+                            rationale=result.rationale,
+                        )
+
+                    except Exception as e:
+                        logger.error(f"Error categorizing '{split_line.memo}': {e}")
+                        # Leave uncategorized on error
+                        split_line.needs_review = True
 
         return split_lines
+
+    def _apply_categorization(
+        self, split_line: ProposedSplitLine, category_id: str, confidence: float | None
+    ) -> None:
+        """Apply categorization results to a split line."""
+        # Find category name
+        category_name = None
+        for cat in self.categories:
+            if cat.id == category_id:
+                category_name = f"{cat.category_group_name} > {cat.name}"
+                break
+
+        # Update split line
+        split_line.category_id = category_id
+        split_line.category_name = category_name
+        split_line.confidence = confidence
+
+        # Flag for review if confidence is low
+        if confidence is not None and confidence < 0.9:
+            split_line.needs_review = True

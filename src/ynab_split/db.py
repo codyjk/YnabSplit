@@ -76,7 +76,7 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute("SELECT value FROM config WHERE key = ?", (key,))
         row = cursor.fetchone()
-        return row["value"] if row else None
+        return str(row["value"]) if row else None
 
     def set_config(self, key: str, value: str):
         """Set a config value."""

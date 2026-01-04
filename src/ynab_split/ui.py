@@ -19,11 +19,13 @@ class CategoryCompleter(Completer):
         """Initialize the completer with available categories."""
         self.categories = categories
 
-        # Build searchable strings
+        # Build searchable strings and name-to-id mapping
         self.searchable = []
+        self.name_to_id = {}
         for cat in categories:
             full_name = f"{cat.category_group_name} > {cat.name}"
             self.searchable.append((cat.id, full_name, cat))
+            self.name_to_id[full_name] = cat.id
 
     def get_completions(self, document: Document, complete_event: Any):
         """Get fuzzy-matched completions."""
@@ -31,23 +33,21 @@ class CategoryCompleter(Completer):
 
         if not query:
             # Show all categories when no query
-            for cat_id, full_name, _cat in self.searchable:
+            for _cat_id, full_name, _cat in self.searchable:
                 yield Completion(
-                    text=cat_id,
+                    text=full_name,
                     start_position=0,
                     display=full_name,
-                    display_meta=cat_id,
                 )
             return
 
         # Fuzzy match: all query characters must appear in order
-        for cat_id, full_name, _cat in self.searchable:
+        for _cat_id, full_name, _cat in self.searchable:
             if self._fuzzy_match(query, full_name.lower()):
                 yield Completion(
-                    text=cat_id,
+                    text=full_name,
                     start_position=-len(document.text),
                     display=full_name,
-                    display_meta=cat_id,
                 )
 
     def _fuzzy_match(self, query: str, text: str) -> bool:
@@ -83,43 +83,67 @@ def select_category_interactive(
     Returns:
         Selected category ID, or None to skip
     """
+    # Filter out uncategorized
+    usable_categories = [
+        cat
+        for cat in categories
+        if not (
+            cat.category_group_name == "Internal Master Category"
+            and cat.name == "Uncategorized"
+        )
+    ]
+
     print(f"\n📝 Categorize: {expense_description}")
 
     # Show suggestion if available
+    suggested_name = ""
     if suggested_category_id and confidence:
-        for cat in categories:
+        for cat in usable_categories:
             if cat.id == suggested_category_id:
-                suggestion_text = f"{cat.category_group_name} > {cat.name}"
+                suggested_name = f"{cat.category_group_name} > {cat.name}"
                 print(
-                    f"   💡 Suggested: {suggestion_text} (confidence: {confidence:.2f})"
+                    f"   💡 Suggested: {suggested_name} (confidence: {confidence:.2f})"
                 )
                 break
 
     print("   Type to search, press Enter to confirm, Ctrl+C to skip\n")
 
     # Create session with completer
-    completer = CategoryCompleter(categories)
+    completer = CategoryCompleter(usable_categories)
     session: PromptSession[str] = PromptSession(completer=completer)
 
     try:
-        # If suggestion exists and confidence is high, use it as default
+        # If suggestion exists and confidence is high, pre-fill with category name
         default_text = ""
-        if suggested_category_id and confidence and confidence >= 0.8:
-            default_text = suggested_category_id
+        if suggested_name and confidence and confidence >= 0.8:
+            default_text = suggested_name
 
-        result = session.prompt("Category: ", default=default_text)
+        # Loop until valid category or skip
+        while True:
+            result = session.prompt(
+                "Category: ",
+                default=default_text,
+                complete_while_typing=True,
+            )
 
-        if result:
-            # Validate that it's a real category ID
-            for cat in categories:
-                if cat.id == result:
-                    logger.info(f"User selected category: {cat.name}")
-                    return result
+            if not result:
+                # Empty input - skip
+                return None
 
-            print(f"❌ Invalid category ID: {result}")
-            return None
+            # Map category name back to ID
+            category_id = completer.name_to_id.get(result)
+            if category_id:
+                # Find the category to log the name
+                for cat in usable_categories:
+                    if cat.id == category_id:
+                        logger.info(f"User selected category: {cat.name}")
+                        return category_id
 
-        return None
+            # Invalid input - show error and retry
+            print(
+                "❌ Invalid category. Please select from the list or press Tab to complete."
+            )
+            default_text = ""  # Clear default for retry
 
     except KeyboardInterrupt:
         print("\n⏭️  Skipped")

@@ -169,20 +169,25 @@ def draft(
 
 def format_money(amount: float, use_color: bool = True) -> str:
     """
-    Format money in accounting style.
+    Format money in accounting style with alignment.
 
     Negative amounts use parentheses: ($85.02)
-    Positive amounts have no sign: $85.02
+    Positive amounts have spaces:      $85.02
+    The spaces ensure decimal points align in tables.
     """
     abs_amount = abs(amount)
     if amount < 0:
-        formatted = (
-            f"($[red]{abs_amount:,.2f}[/red])" if use_color else f"(${abs_amount:,.2f})"
-        )
+        # Negative: ($85.02)
+        if use_color:
+            formatted = f"($[red]{abs_amount:,.2f}[/red])"
+        else:
+            formatted = f"(${abs_amount:,.2f})"
     else:
-        formatted = (
-            f"[green]${abs_amount:,.2f}[/green]" if use_color else f"${abs_amount:,.2f}"
-        )
+        # Positive:  $85.02  (leading and trailing space for alignment)
+        if use_color:
+            formatted = f" [green]${abs_amount:,.2f}[/green] "
+        else:
+            formatted = f" ${abs_amount:,.2f} "
     return formatted
 
 

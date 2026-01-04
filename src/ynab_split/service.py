@@ -140,16 +140,32 @@ class SettlementService:
         """
         Fetch YNAB categories for the configured budget.
 
+        Filters out "Internal Master Category > Uncategorized" as it should
+        never be used for expense categorization.
+
         Returns:
-            List of active YNAB categories
+            List of active, usable YNAB categories
         """
         with YnabClient(self.settings.ynab_access_token) as client:
             categories: list[YnabCategory] = client.get_categories(
                 budget_id=self.settings.ynab_budget_id, active_only=True
             )
 
-        logger.info(f"Fetched {len(categories)} active YNAB categories")
-        return categories
+        # Filter out uncategorized
+        usable_categories = [
+            cat
+            for cat in categories
+            if not (
+                cat.category_group_name == "Internal Master Category"
+                and cat.name == "Uncategorized"
+            )
+        ]
+
+        logger.info(
+            f"Fetched {len(usable_categories)} usable YNAB categories "
+            f"(filtered {len(categories) - len(usable_categories)} internal)"
+        )
+        return usable_categories
 
     def categorize_draft(
         self, draft: ClearingTransactionDraft
