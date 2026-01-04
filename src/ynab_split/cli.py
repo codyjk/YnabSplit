@@ -79,14 +79,11 @@ def draft(
         draft = service.create_draft_transaction(expenses)
 
         # Check if already processed
-        existing = service.check_if_already_processed(draft)
-        if existing:
+        already_exists = service.check_if_already_processed(draft)
+        if already_exists:
             console.print(
-                f"\n[yellow]⚠️  This settlement was already processed on "
-                f"{existing.created_at.date()}[/yellow]"
-            )
-            console.print(
-                f"[yellow]YNAB transaction ID: {existing.ynab_transaction_id}[/yellow]\n"
+                f"\n[yellow]⚠️  This settlement already exists in YNAB "
+                f"(settlement date: {draft.settlement_date})[/yellow]\n"
             )
             return
 
@@ -306,14 +303,11 @@ def apply(
         draft = service.create_draft_transaction(expenses)
 
         # Check if already processed
-        existing = service.check_if_already_processed(draft)
-        if existing:
+        already_exists = service.check_if_already_processed(draft)
+        if already_exists:
             console.print(
-                f"\n[yellow]⚠️  This settlement was already processed on "
-                f"{existing.created_at.date()}[/yellow]"
-            )
-            console.print(
-                f"[yellow]YNAB transaction ID: {existing.ynab_transaction_id}[/yellow]\n"
+                f"\n[yellow]⚠️  This settlement already exists in YNAB "
+                f"(settlement date: {draft.settlement_date})[/yellow]\n"
             )
             return
 

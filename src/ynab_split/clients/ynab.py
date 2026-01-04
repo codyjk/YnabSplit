@@ -204,3 +204,48 @@ class YnabClient:
         import_id = f"YS-{hash_str}-{draft.settlement_date.isoformat()}"
 
         return import_id
+
+    def transaction_exists(
+        self, budget_id: str, draft: ClearingTransactionDraft
+    ) -> bool:
+        """
+        Check if a transaction for this draft already exists in YNAB.
+
+        Args:
+            budget_id: The YNAB budget ID
+            draft: The draft transaction to check
+
+        Returns:
+            True if a transaction with this import_id exists in YNAB
+        """
+        # Generate the import_id for this draft
+        import_id = self._generate_import_id(draft)
+
+        # Fetch transactions from YNAB around the settlement date
+        # Check ±7 days to account for timing differences
+        from datetime import timedelta
+
+        since_date = (draft.settlement_date - timedelta(days=7)).isoformat()
+
+        try:
+            response = self.client.get(
+                f"/budgets/{budget_id}/transactions",
+                params={"since_date": since_date},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Check if any transaction has this import_id
+            for transaction in data.get("data", {}).get("transactions", []):
+                if transaction.get("import_id") == import_id:
+                    logger.info(
+                        f"Found existing transaction in YNAB with import_id: {import_id}"
+                    )
+                    return True
+
+            return False
+
+        except httpx.HTTPError as e:
+            logger.warning(f"Error checking YNAB for existing transaction: {e}")
+            # If we can't check YNAB, assume it doesn't exist (fail open)
+            return False

@@ -114,27 +114,30 @@ class SettlementService:
 
         return draft
 
-    def check_if_already_processed(
-        self, draft: ClearingTransactionDraft
-    ) -> ProcessedSettlement | None:
+    def check_if_already_processed(self, draft: ClearingTransactionDraft) -> bool:
         """
         Check if a draft has already been processed (idempotency check).
+
+        Checks YNAB API directly rather than relying on local cache.
 
         Args:
             draft: The draft transaction to check
 
         Returns:
-            Processed settlement record if already processed, None otherwise
+            True if already processed, False otherwise
         """
-        # Compute hash from the draft split lines
-        draft_hash = compute_draft_hash_from_draft(draft)
+        # Check YNAB directly for existing transaction
+        with YnabClient(self.settings.ynab_access_token) as client:
+            exists: bool = client.transaction_exists(
+                self.settings.ynab_budget_id, draft
+            )
 
-        existing = self.db.get_processed_settlement_by_hash(draft_hash)
+            if exists:
+                logger.info(
+                    f"Draft already exists in YNAB for settlement on {draft.settlement_date}"
+                )
 
-        if existing:
-            logger.info(f"Draft already processed: {existing.ynab_transaction_id}")
-
-        return existing
+            return exists
 
     def get_ynab_categories(self) -> list[YnabCategory]:
         """
@@ -216,12 +219,13 @@ class SettlementService:
             YNAB transaction ID
         """
         # Check if already processed (idempotency)
-        existing = self.check_if_already_processed(draft)
-        if existing:
-            logger.warning(f"Draft already processed on {existing.created_at.date()}")
+        already_exists = self.check_if_already_processed(draft)
+        if already_exists:
+            logger.warning(
+                f"Draft already exists in YNAB (settlement date: {draft.settlement_date})"
+            )
             raise ValueError(
-                f"This settlement was already processed on {existing.created_at.date()}. "
-                f"YNAB transaction ID: {existing.ynab_transaction_id}"
+                f"This settlement already exists in YNAB (settlement date: {draft.settlement_date})"
             )
 
         # Create transaction in YNAB
