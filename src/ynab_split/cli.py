@@ -70,9 +70,9 @@ def draft(
         # Create service
         service = SettlementService(settings, db)
 
-        # Get recent settlements
+        # Get recent settlements (fetch 3 to ensure we have previous settlement for filtering)
         console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
-        settlements = service.get_recent_settlements(count=2)
+        settlements = service.get_recent_settlements(count=3)
 
         if not settlements:
             console.print("[yellow]No settlements found.[/yellow]")
@@ -319,9 +319,9 @@ def apply(
         # Create service
         service = SettlementService(settings, db)
 
-        # Get recent settlements
+        # Get recent settlements (fetch 3 to ensure we have previous settlement for filtering)
         console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
-        settlements = service.get_recent_settlements(count=2)
+        settlements = service.get_recent_settlements(count=3)
 
         if not settlements:
             console.print("[yellow]No settlements found.[/yellow]")
@@ -471,9 +471,9 @@ def fix_import_id(
         # Create service
         service = SettlementService(settings, db)
 
-        # Get recent settlements
+        # Get recent settlements (fetch 3 to ensure we have previous settlement for filtering)
         console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
-        settlements = service.get_recent_settlements(count=2)
+        settlements = service.get_recent_settlements(count=3)
 
         if not settlements:
             console.print("[yellow]No settlements found.[/yellow]")

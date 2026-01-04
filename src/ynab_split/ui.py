@@ -232,7 +232,12 @@ def select_settlement_interactive(
         print()
 
     try:
-        response = input("Select settlement [1-2, or q to quit]: ").strip().lower()
+        max_selection = len(settlements)
+        response = (
+            input(f"Select settlement [1-{max_selection}, or q to quit]: ")
+            .strip()
+            .lower()
+        )
 
         if response in ("q", "quit", ""):
             return None

@@ -37,7 +37,7 @@ class SettlementService:
         self.settings = settings
         self.db = database
 
-    def get_recent_settlements(self, count: int = 2) -> list[SplitwiseExpense]:
+    def get_recent_settlements(self, count: int = 3) -> list[SplitwiseExpense]:
         """
         Get recent settlements from Splitwise.
 
