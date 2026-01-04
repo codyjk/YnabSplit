@@ -209,6 +209,8 @@ class SplitwiseClient:
         """
         from datetime import datetime
 
+        logger.info("=== ENTERING get_expenses_since_last_settlement ===")
+
         # Get settlement history
         settlements = self.get_settlement_history(group_id, count=2)
         logger.info(f"Found {len(settlements)} settlements in history")
