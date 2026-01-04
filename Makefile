@@ -12,7 +12,7 @@ install: clean ## Install to PATH (uninstalls old version first)
 	@echo "Uninstalling old version..."
 	@uv tool uninstall ynab-split 2>/dev/null || true
 	@echo "Installing fresh version..."
-	uv tool install .
+	uv tool install --force --reinstall .
 	@echo "✓ Installation complete"
 
 dev-install: ## Install development dependencies
