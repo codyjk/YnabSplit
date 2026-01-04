@@ -115,6 +115,7 @@ def draft(
                                 expense_description=line.memo,
                                 suggested_category_id=line.category_id,
                                 confidence=line.confidence,
+                                auto_fill=not review_all,  # Don't auto-fill in review-all mode
                             )
 
                             if new_category_id:
@@ -341,6 +342,7 @@ def apply(
                                 expense_description=line.memo,
                                 suggested_category_id=line.category_id,
                                 confidence=line.confidence,
+                                auto_fill=not review_all,  # Don't auto-fill in review-all mode
                             )
 
                             if new_category_id:

@@ -70,6 +70,7 @@ def select_category_interactive(
     expense_description: str,
     suggested_category_id: str | None = None,
     confidence: float | None = None,
+    auto_fill: bool = True,
 ) -> str | None:
     """
     Interactive category selection with fuzzy search.
@@ -79,6 +80,7 @@ def select_category_interactive(
         expense_description: Description of the expense being categorized
         suggested_category_id: Optional GPT-suggested category
         confidence: Optional confidence score
+        auto_fill: Whether to pre-fill high-confidence suggestions (default: True)
 
     Returns:
         Selected category ID, or None to skip
@@ -115,7 +117,7 @@ def select_category_interactive(
     try:
         # If suggestion exists and confidence is high, pre-fill with category name
         default_text = ""
-        if suggested_name and confidence and confidence >= 0.8:
+        if auto_fill and suggested_name and confidence and confidence >= 0.8:
             default_text = suggested_name
 
         # Loop until valid category or skip
