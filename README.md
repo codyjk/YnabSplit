@@ -1,314 +1,336 @@
-# Splitwise → YNAB Clearing Transaction Automator (API-first, Python + uv)
+# YnabSplit
 
-## Problem statement
+Automate YNAB clearing transactions from Splitwise settlements with GPT-powered categorization.
 
-My wife and I each keep separate YNAB budgets. Shared expenses are tracked in Splitwise and settled periodically via Venmo. The settlement shows up in YNAB as a **single** Venmo/bank transaction, but it represents many underlying Splitwise items that should be categorized across multiple YNAB categories.
+## Problem Statement
 
-**Goal:** Automate creation of an adjacent **clearing transaction** in YNAB that:
-- has the same total amount/date/payee characteristics as the Venmo settlement (so bank import will match it later)
-- is a **split** transaction where **one Splitwise expense item = one split line** in YNAB
-- correctly allocates category inflows/outflows per Splitwise item, while netting to the settlement total
+Shared expenses tracked in Splitwise are settled periodically via Venmo/bank transfer. The settlement shows up in YNAB as a **single** transaction, but represents many underlying expenses that should be categorized across multiple YNAB categories.
 
-This project is implemented as an idiomatic Python project using `uv` for package management. It is **API-first**.
-
----
-
-## Key requirements / constraints
-
-- **Strict mode:** 1 Splitwise item → 1 YNAB split line (no grouping/aggregation).
-- **Clearing transaction pattern:** Create a new manual YNAB transaction; later the imported bank/Venmo transaction matches it automatically.
-- ~100 total YNAB categories across ~10 groups; ~30–40 active (most hidden). Default mapping should use active categories only.
-- Category mapping should be mostly deterministic:
-  - rules + cache first
-  - GPT fallback only for unknown/ambiguous items
-- Idempotent: repeated runs should not create duplicate clearing transactions for the same settlement.
+**YnabSplit** automates creation of a **clearing transaction** in YNAB that:
+- Has the same total amount/date/payee as the settlement (so bank import matches it later)
+- Is a **split transaction** where **one Splitwise expense = one split line** in YNAB
+- Correctly allocates category inflows/outflows per expense, while netting to the settlement total
+- Uses GPT-4o-mini to intelligently categorize expenses with caching for speed
 
 ---
 
-## High-level architecture
+## Quick Start
 
-### Components
-1. **HTTP API service (primary)**
-   - Handles reconciliation workflow
-   - Owns adapters for YNAB + Splitwise
-   - Owns mapping logic + state store (SQLite)
+**1. Install:**
+```bash
+git clone https://github.com/codyjk/YnabSplit.git
+cd YnabSplit
+make dev-install
+```
 
-2. **CLI client (thin wrapper)**
-   - Calls HTTP endpoints
-   - Useful for local workflows, scripting, Cron
+**2. Configure:**
+Copy `.env.example` to `.env` and add your API keys:
+- [Splitwise API key](https://secure.splitwise.com/apps)
+- [YNAB access token](https://app.ynab.com/settings/developer)
+- [OpenAI API key](https://platform.openai.com/api-keys)
 
-3. **State store (SQLite)**
-   - Settlement idempotency + applied transaction ids
-   - Merchant/keyword mapping cache and overrides
-   - Optional YNAB metadata cache (categories/accounts snapshot)
-
----
-
-## Core workflow (per settlement)
-
-1. **Identify settlement scope**
-   - Input options:
-     - Splitwise “settle up” id (preferred if available)
-     - OR CSV import id + date range
-     - OR explicit list of Splitwise expense ids
-   - Include `expected_net_amount` (the Venmo settlement amount) unless derived from settle-up metadata.
-
-2. **Collect Splitwise expenses in scope**
-   - Normalize each expense to a single internal model.
-
-3. **Compute signed amounts (your POV)**
-   - For each Splitwise expense, compute **your net**:
-     - `net = (your_paid_share - your_owed_share)`
-   - Interpretation:
-     - `net > 0`: you are owed money for this expense → **YNAB inflow** to the mapped category
-     - `net < 0`: you owe money for this expense → **YNAB outflow** to the mapped category
-   - Convert dollars to **milliunits**.
-
-4. **Map each Splitwise expense to a YNAB category**
-   - **Pass 1: hard rules**
-     - merchant regex (e.g., “Whole Foods” → Groceries)
-     - keyword rules in description/notes
-     - optional Splitwise category → YNAB category mapping table
-   - **Pass 2: learned mapping cache**
-     - `(normalized_merchant | normalized_description_prefix) -> ynab_category_id`
-   - **Pass 3: GPT fallback**
-     - Only for expenses not mapped by rules/cache
-     - Provide only **active categories** by default (30–40)
-     - Optionally narrow to top-k candidates via fuzzy match
-     - Require structured JSON output: `{category_id, confidence, rationale_short}`
-   - If confidence < threshold, mark item `needs_review`.
-
-5. **Validate totals**
-   - Sum of all expense nets must equal `expected_net_amount` (milliunits), within tolerance.
-   - If off by rounding, adjust the last split line by the residual milliunit(s).
-   - If materially off, refuse to apply.
-
-6. **Create a clearing transaction draft**
-   - Contains:
-     - payee (e.g., “Venmo”)
-     - date
-     - account (clearing account)
-     - total amount (expected net)
-     - strict list of split lines (one per Splitwise expense)
-     - metadata for audit + idempotency
-
-7. **Optional review/resolve**
-   - If any `needs_review`, user provides overrides (expense id → category id).
-   - Persist confirmed mappings into cache.
-
-8. **Apply**
-   - Create a new YNAB transaction in the clearing account with split lines.
-   - Stamp memo with settlement metadata so it’s easy to trace.
-   - Record `(settlement_id, draft_hash) -> ynab_transaction_id` in SQLite for idempotency.
+**3. Run:**
+```bash
+make              # Preview draft (dry-run)
+make run-apply    # Create transaction in YNAB
+```
 
 ---
 
-## Domain model (conceptual)
+## Usage
 
-### SplitwiseExpense
-- `id`, `group_id`, `date`
-- `description`, `notes`, `merchant` (if derivable)
-- `cost`, `currency`
-- `paid_by`, `shares` (enough to compute your net)
-- `participants`
+### Commands
 
-### Settlement
-- `id` (Splitwise settle-up id preferred; otherwise synthetic)
-- `date_range` or explicit expense ids
-- `expected_net_amount_milliunits`
-- `currency`
+```bash
+make                # Install deps + preview draft (default)
+make run-draft      # Preview transaction without creating it
+make run-apply      # Create transaction in YNAB
+make clear-cache    # Clear category mapping cache
+make check          # Run linting + type checking
+make test           # Run test suite
+```
 
-### ProposedLine (strict: one per expense)
-- `splitwise_expense_id`
-- `amount_milliunits` (signed)
-- `ynab_category_id`
-- `memo` (include Splitwise expense id + original description)
+### CLI Flags
 
-### ClearingTransactionDraft
-- `draft_id`
-- `account_id` (clearing account)
-- `payee` / `payee_id`
-- `date`
-- `total_amount_milliunits`
-- `lines: list[ProposedLine]` (1:1 with expenses)
-- `metadata`:
-  - `settlement_id`, `group_id`
-  - `expense_ids`
-  - `hash(payload)` (idempotency key)
+```bash
+ynab-split draft [OPTIONS]
+  --categorize, -c       Enable GPT categorization
+  --review, -r           Review low-confidence categories
+  --review-all           Review ALL categories interactively
+  --verbose, -v          Verbose logging
 
----
+ynab-split apply [OPTIONS]
+  --categorize, -c       Enable GPT categorization (default: True)
+  --review-all           Review ALL categories interactively
+  --yes, -y              Skip confirmation prompt
+  --verbose, -v          Verbose logging
+```
 
-## State store (SQLite) responsibilities
+### Interactive Review
 
-- **processed_settlements**
-  - `settlement_id` (unique)
-  - `draft_hash`
-  - `ynab_transaction_id`
-  - timestamps
+When using `--review-all`:
+1. For each expense, you'll see the GPT-suggested category
+2. Press `Y` to confirm, `n` to change
+3. Type to fuzzy-search categories (e.g., "gro" → "Groceries")
+4. Press `Tab` for completions, `Enter` to select, `Ctrl+C` to skip
 
-- **merchant_category_map**
-  - `pattern` / `normalized_key`
-  - `ynab_category_id`
-  - `source` (rule/manual/gpt)
-  - `confidence`, timestamps
-
-- **expense_overrides**
-  - `splitwise_expense_id` -> `ynab_category_id`
-
-- **ynab_cache (optional)**
-  - categories snapshot + refreshed_at
-  - accounts snapshot + refreshed_at
+Manual corrections are cached for future runs.
 
 ---
 
-## Category mapping behavior (cost + reliability)
+## Architecture
 
-### Default category universe
-- Use **active categories only** (non-hidden) for mapping and GPT candidate lists.
-- Allow explicit override to include hidden categories.
+### Project Structure
 
-### GPT fallback (only when needed)
-- Inputs:
-  - expense: `{description, notes, merchant, amount, splitwise_category?}`
-  - candidate categories: `[{id, group, name}]` (active only; optionally top-k)
-- Output (structured):
-  - `{category_id: string, confidence: float 0..1, rationale_short: string}`
-- Policy:
-  - if `confidence >= threshold`: accept
-  - else: `needs_review`
+```
+src/ynab_split/
+├── cli.py                # Typer CLI with rich formatting
+├── service.py            # High-level business logic
+├── reconciler.py         # Rounding adjustment algorithm
+├── categorizer.py        # Cache-first GPT categorization
+├── mapper.py             # SQLite category mapping cache
+├── db.py                 # Database layer
+├── models.py             # Pydantic domain models
+├── ui.py                 # Interactive category selection
+└── clients/
+    ├── splitwise.py      # Splitwise API client
+    ├── ynab.py           # YNAB API client
+    └── openai_client.py  # OpenAI GPT-4o-mini wrapper
+```
 
-### Learning loop
-- When user resolves ambiguous items, persist those mappings so next time they’re rule/cached and GPT is unnecessary.
+### Component Diagram
+
+```mermaid
+graph TB
+    subgraph "CLI Layer"
+        CLI[cli.py<br/>draft/apply commands]
+        UI[ui.py<br/>select_category_interactive<br/>confirm_category]
+    end
+
+    subgraph "Service Layer"
+        Service[SettlementService<br/>fetch_expenses_since_last_settlement<br/>create_draft_transaction<br/>categorize_draft<br/>apply_draft]
+        Reconciler[reconciler.py<br/>compute_splits_with_adjustment<br/>determine_expected_total]
+        Categorizer[ExpenseCategorizer<br/>categorize_split_line<br/>categorize_all_split_lines]
+    end
+
+    subgraph "Data Layer"
+        Mapper[CategoryMapper<br/>get_cached_mapping<br/>save_mapping]
+        DB[Database<br/>get_processed_settlement_by_hash<br/>save_processed_settlement]
+    end
+
+    subgraph "External APIs"
+        SplitwiseAPI[Splitwise API]
+        YNABAPI[YNAB API]
+        OpenAIAPI[OpenAI API]
+    end
+
+    subgraph "API Clients"
+        SplitwiseClient[SplitwiseClient<br/>get_expenses_since_last_settlement<br/>get_settlement_history<br/>calculate_current_balance]
+        YnabClient[YnabClient<br/>get_categories<br/>create_transaction]
+        Classifier[CategoryClassifier<br/>classify_expense]
+    end
+
+    subgraph "Domain Models"
+        Models[models.py<br/>SplitwiseExpense<br/>ClearingTransactionDraft<br/>ProposedSplitLine<br/>YnabCategory<br/>ProcessedSettlement]
+    end
+
+    CLI --> Service
+    CLI --> UI
+    Service --> SplitwiseClient
+    Service --> YnabClient
+    Service --> Categorizer
+    Service --> Reconciler
+    Service --> Mapper
+    Service --> DB
+    Categorizer --> Mapper
+    Categorizer --> Classifier
+    SplitwiseClient --> SplitwiseAPI
+    YnabClient --> YNABAPI
+    Classifier --> OpenAIAPI
+    Mapper --> DB
+    Service -.uses.-> Models
+    SplitwiseClient -.uses.-> Models
+    YnabClient -.uses.-> Models
+```
+
+### Sequence Diagram: Draft + Apply Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant CLI as cli.py<br/>draft/apply
+    participant Service as SettlementService
+    participant SW as SplitwiseClient
+    participant YNAB as YnabClient
+    participant Cat as ExpenseCategorizer
+    participant Map as CategoryMapper
+    participant GPT as CategoryClassifier
+    participant DB as Database
+    participant UI as ui.py
+
+    Note over User,UI: DRAFT PHASE
+
+    User->>+CLI: make (run-draft)
+    CLI->>+Service: fetch_expenses_since_last_settlement()
+    Service->>+SW: get_current_user()
+    SW-->>-Service: user_id
+    Service->>+SW: get_expenses_since_last_settlement(group_id, user_id)
+    Note over SW: Auto-detects pre/post-settlement mode
+    SW-->>-Service: (expenses, mode)
+    Service-->>-CLI: expenses
+
+    CLI->>+Service: create_draft_transaction(expenses)
+    Note over Service: compute_splits_with_adjustment()
+    Service-->>-CLI: draft
+
+    CLI->>+Service: check_if_already_processed(draft)
+    Service->>+DB: get_processed_settlement_by_hash(draft_hash)
+    DB-->>-Service: None (not processed yet)
+    Service-->>-CLI: None
+
+    Note over CLI,GPT: CATEGORIZATION PHASE
+
+    CLI->>+Service: categorize_draft(draft)
+    Service->>+YNAB: get_categories(budget_id)
+    YNAB-->>-Service: categories[]
+
+    Service->>+Cat: categorize_all_split_lines(draft.split_lines)
+
+    loop For each split line
+        Cat->>+Map: get_cached_mapping(description)
+        alt Cache hit
+            Map-->>Cat: cached category
+        else Cache miss
+            Map-->>Cat: None
+            Cat->>+GPT: classify_expense(description, categories)
+            Note over GPT: Parallel API calls via ThreadPoolExecutor
+            GPT-->>-Cat: (category_id, confidence, rationale)
+            Cat->>+Map: save_mapping(description, category_id, ...)
+            Map-->>Cat: ✓
+        end
+        deactivate Map
+    end
+
+    Cat-->>-Service: categorized split_lines
+    Service-->>-CLI: draft
+
+    Note over CLI,UI: REVIEW PHASE
+
+    loop For each split line (if --review-all)
+        CLI->>+UI: confirm_category(category_id, categories, description)
+        UI->>User: Show category, ask Y/n
+        alt User rejects
+            UI->>UI: select_category_interactive(...)
+            UI->>User: Fuzzy search prompt
+            User->>UI: Select new category
+            UI-->>CLI: new_category_id
+            CLI->>+Map: save_mapping(description, new_category_id, source="manual")
+            Map-->>-CLI: ✓
+        else User accepts
+            UI-->>CLI: confirmed
+        end
+        deactivate UI
+    end
+
+    CLI->>User: Display draft table
+    deactivate CLI
+
+    Note over User,UI: APPLY PHASE (if run-apply)
+
+    User->>+CLI: make run-apply
+    Note over CLI,Service: (Repeat fetch + categorize + review)
+
+    CLI->>+Service: apply_draft(draft)
+    Service->>+DB: check_if_already_processed(draft)
+    DB-->>-Service: None
+
+    Service->>+YNAB: create_transaction(budget_id, draft)
+    Note over YNAB: Validates categories, creates split transaction
+    YNAB-->>-Service: transaction_id
+
+    Service->>+DB: save_processed_settlement(settlement)
+    DB-->>-Service: ✓
+
+    Service-->>-CLI: transaction_id
+    CLI->>User: ✓ Transaction created!
+    deactivate CLI
+```
+
+### Key Components
+
+- **SettlementService**: Orchestrates workflow - fetches expenses, creates drafts, categorizes, applies to YNAB
+- **ExpenseCategorizer**: Cache-first categorization with parallel GPT calls via ThreadPoolExecutor (8-10x speedup)
+- **Reconciler**: `compute_splits_with_adjustment()` ensures split line totals exactly match settlement amount (exhaustively tested against rounding errors)
+- **CategoryMapper**: SQLite-backed cache with confidence tracking - learns from manual corrections
+- **Interactive UI**: Fuzzy-searchable category picker with tab completion using prompt_toolkit
+
+### Database Schema
+
+SQLite database at `~/.ynab_split/ynab_split.db`:
+
+- **`processed_settlements`**: Tracks applied settlements for idempotency (settlement_date, draft_hash, ynab_transaction_id)
+- **`category_mappings`**: Caches expense description → category mappings (description, ynab_category_id, source, confidence)
+- **`config`**: Stores last settlement date for auto-detection
 
 ---
 
-## Clearing transaction behavior in YNAB
+## How It Works
 
-### The created clearing transaction
-- `account_id = clearing_account_id`
-- `payee = clearing_payee` (e.g., “Venmo”)
-- `date = settlement date` (or user-provided)
-- `amount = expected_net_amount` (milliunits)
-- `memo` includes:
-  - `sw_settlement_id`, `sw_group_id`
-  - list/hash of expense ids
-  - `draft_hash`
-
-### Split lines (strict)
-For each Splitwise expense (exactly one line):
-- `category_id = mapped category`
-- `amount = computed signed net (milliunits)`
-- `memo = "Splitwise: <description> (expense_id=<id>)"`
-
-### Matching expectation
-When the real Venmo/bank transaction imports:
-- YNAB should match it to the manual clearing transaction based on:
-  - same account
-  - same amount
-  - close date
-  - payee/memo similarity (depending on your import source)
+1. **Fetch Expenses**: Auto-detects pre/post-settlement mode and fetches appropriate expenses from Splitwise
+2. **Compute Splits**: For each expense, calculates net amount: `net = paid_share - owed_share`
+   - `net > 0`: YNAB inflow (you're owed)
+   - `net < 0`: YNAB outflow (you owe)
+3. **Categorize**: Checks cache first, then calls GPT-4o-mini in parallel for uncached items
+4. **Adjust Rounding**: Ensures split totals exactly equal settlement amount (adjust last line by residual milliunits)
+5. **Apply**: Creates YNAB split transaction and stores hash for idempotency
 
 ---
 
-## HTTP API design (high-level)
+## Development
 
-### Health / config
-- `GET /health`
-- `GET /config`
-- `PUT /config`
-  - store:
-    - `ynab_budget_id`
-    - `ynab_clearing_account_id`
-    - `clearing_payee`
-    - `active_categories_only=true`
-    - `gpt_threshold`
-    - `match_date_tolerance_days`
+**Requirements:**
+- Python 3.13+
+- [uv](https://github.com/astral-sh/uv) package manager
 
-### YNAB metadata
-- `POST /ynab/sync`
-  - refresh accounts + categories
-- `GET /ynab/categories?active_only=true`
-- `GET /ynab/accounts`
+**Code Quality:**
+```bash
+make check          # Ruff linting + mypy type checking
+make format         # Auto-format code
+make test           # Run test suite
+make test-rounding  # Run exhaustive rounding tests (100,000+ cases)
+```
 
-### Splitwise ingestion
-- `POST /splitwise/import/csv`
-  - upload CSV + metadata (group/user context)
-  - returns `import_id`, detected date range, expense count
-- `GET /splitwise/expenses?import_id=...`
-- (later) `POST /splitwise/sync` (API mode)
-
-### Settlement workflow
-- `POST /settlements/draft`
-  - request supports:
-    - `splitwise_settlement_id`
-    - OR `import_id + date_range`
-    - OR `explicit_expense_ids`
-    - `expected_net_amount`
-    - `settlement_date`
-  - response:
-    - `draft_id`
-    - draft summary + strict split lines
-    - list of `needs_review` items with candidate categories
-
-- `POST /settlements/draft/{draft_id}/resolve`
-  - body: `{overrides: [{splitwise_expense_id, ynab_category_id}]}`
-  - response: updated draft
-
-- `POST /settlements/draft/{draft_id}/approve`
-  - locks draft hash for apply (optional but useful)
-
-- `POST /settlements/draft/{draft_id}/apply`
-  - creates clearing transaction in YNAB
-  - idempotent:
-    - if `(settlement_id, draft_hash)` already applied → return existing `ynab_transaction_id`
-
-### Mapping management
-- `GET /mappings`
-- `POST /mappings`
-  - add/update a rule: `pattern -> ynab_category_id`
-- `DELETE /mappings/{id}`
-- `POST /mappings/learn`
-  - persist confirmed mappings from a draft apply/review
+**Pre-commit Hooks:**
+Automatically run on every commit: ruff linting/formatting, mypy, YAML validation, security checks.
 
 ---
 
-## CLI (thin wrapper over HTTP)
+## Troubleshooting
 
-- `sync` → `/ynab/sync`
-- `import-csv` → `/splitwise/import/csv`
-- `draft-settlement` → `/settlements/draft`
-- `resolve` → `/settlements/draft/{id}/resolve`
-- `apply` → `/settlements/draft/{id}/apply`
-- `status` → list recent settlements and their applied YNAB tx ids
+**"This settlement was already processed"**
+- You've already applied this settlement. Delete the YNAB transaction manually, then:
+  ```bash
+  sqlite3 ~/.ynab_split/ynab_split.db "DELETE FROM processed_settlements WHERE settlement_date = 'YYYY-MM-DD';"
+  ```
 
----
+**Clear category cache:**
+```bash
+make clear-cache
+```
 
-## Incremental delivery plan
-
-### Phase 1: Draft-only (no YNAB writes)
-- CSV import → draft settlement → returns strict split lines + needs_review list
-- Validate sign conventions and total net math
-
-### Phase 2: Apply clearing transaction
-- Implement `/apply` to create YNAB clearing transaction
-- Add memo stamping + idempotency DB record
-
-### Phase 3: GPT fallback + review loop
-- Add GPT categorizer only for unmapped items
-- Add `needs_review` and `/resolve`
-- Persist confirmed mappings for future automation
-
-### Phase 4: Splitwise API mode
-- Add Splitwise API ingestion
-- Keep CSV import as a permanent fallback
+**Verbose logging:**
+```bash
+ynab-split draft --verbose
+```
 
 ---
 
-## Safety / correctness guarantees (must-have)
+## License
 
-- **Dry-run by default:** `/draft` computes everything without writing.
-- **Idempotent apply:** never create duplicates for the same settlement+hash.
-- **Strict traceability:** every split line references Splitwise expense id in memo.
-- **Active-category allowlist:** default mapping among active categories only.
-- **Fail closed on mismatch:** refuse to apply if totals don’t reconcile.
-- **Rounding control:** adjust residual milliunits on the final line only.
+MIT
+
+---
+
+## Credits
+
+Built with: [uv](https://github.com/astral-sh/uv) • [Typer](https://typer.tiangolo.com/) • [Rich](https://rich.readthedocs.io/) • [prompt_toolkit](https://python-prompt-toolkit.readthedocs.io/) • [Pydantic](https://pydantic-docs.helpmanual.io/) • [OpenAI](https://platform.openai.com/)
