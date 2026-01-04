@@ -187,20 +187,20 @@ class YnabClient:
         """
         Generate a unique import_id for idempotency.
 
-        YNAB uses import_id to prevent duplicate imports.
-        Format: YNABSPLIT:{hash}:{date}
+        YNAB uses import_id to prevent duplicate imports (max 36 chars).
+        Format: YS-{hash}-{date}
 
         Args:
             draft: The draft transaction
 
         Returns:
-            Import ID string
+            Import ID string (max 36 characters)
         """
         # Create hash from draft_id
         hash_obj = hashlib.sha256(draft.draft_id.encode())
-        hash_str = hash_obj.hexdigest()[:16]
+        hash_str = hash_obj.hexdigest()[:12]  # 12 chars for hash
 
-        # Format: YNABSPLIT:hash:date (max 36 chars per YNAB spec)
-        import_id = f"YNABSPLIT:{hash_str}:{draft.settlement_date.isoformat()}"
+        # Format: YS-{hash}-{date} = 3 + 12 + 1 + 10 = 26 chars (well under 36)
+        import_id = f"YS-{hash_str}-{draft.settlement_date.isoformat()}"
 
         return import_id
