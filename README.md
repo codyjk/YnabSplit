@@ -20,7 +20,7 @@ Shared expenses tracked in Splitwise are settled periodically via Venmo/bank tra
 ```bash
 git clone https://github.com/codyjk/YnabSplit.git
 cd YnabSplit
-uv tool install .
+make              # or: make install
 ```
 
 **2. Configure:**

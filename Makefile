@@ -1,6 +1,6 @@
 .PHONY: help install dev-install lint format typecheck test pre-commit clean clear-cache check fix
 
-.DEFAULT_GOAL := help
+.DEFAULT_GOAL := install
 
 help: ## Show this help message
 	@echo "Usage: make [target]"
