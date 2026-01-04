@@ -110,7 +110,7 @@ class SettlementService:
         Fetch expenses after a settlement.
 
         The selected settlement is the LOWER BOUND (starting point).
-        Gets ALL expenses that occurred AFTER the selected settlement, with no upper bound.
+        Gets ALL expenses that occurred AFTER the selected settlement timestamp, with no upper bound.
 
         Args:
             settlement: The settlement to use as the starting point (lower bound)
@@ -119,20 +119,20 @@ class SettlementService:
             List of all expenses after the selected settlement
         """
         with SplitwiseClient(self.settings.splitwise_api_key) as client:
-            settlement_date = settlement.date.date()
+            settlement_datetime = settlement.date
 
             # Fetch ALL expenses after the selected settlement (no upper bound)
-            logger.info(f"Fetching all expenses after {settlement_date}")
+            logger.info(f"Fetching all expenses after {settlement_datetime}")
             expenses = client.get_expenses(
                 group_id=self.settings.splitwise_group_id,
-                dated_after=settlement_date,
+                dated_after=settlement_datetime,
                 limit=1000,
             )
 
             # Filter out payment transactions
             regular_expenses = [exp for exp in expenses if not exp.payment]
             logger.info(
-                f"Found {len(regular_expenses)} expenses after {settlement_date}"
+                f"Found {len(regular_expenses)} expenses after {settlement_datetime}"
             )
 
             return regular_expenses

@@ -51,8 +51,8 @@ class SplitwiseClient:
     def get_expenses(
         self,
         group_id: int,
-        dated_after: date | None = None,
-        dated_before: date | None = None,
+        dated_after: date | datetime | None = None,
+        dated_before: date | datetime | None = None,
         limit: int = 100,
     ) -> list[SplitwiseExpense]:
         """
@@ -60,8 +60,8 @@ class SplitwiseClient:
 
         Args:
             group_id: The Splitwise group ID
-            dated_after: Only include expenses after this date
-            dated_before: Only include expenses before this date
+            dated_after: Only include expenses after this date/datetime
+            dated_before: Only include expenses before this date/datetime
             limit: Maximum number of expenses to return
 
         Returns:
