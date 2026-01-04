@@ -1,8 +1,6 @@
-.PHONY: help install dev-install lint format typecheck test test-rounding pre-commit clean run-draft run-apply default
+.PHONY: help install dev-install lint format typecheck test pre-commit clean clear-cache check fix
 
-.DEFAULT_GOAL := default
-
-default: dev-install run-draft ## Install dependencies and run draft command (default target)
+.DEFAULT_GOAL := help
 
 help: ## Show this help message
 	@echo "Usage: make [target]"
@@ -10,10 +8,10 @@ help: ## Show this help message
 	@echo "Available targets:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install production dependencies
-	uv sync --no-dev
+install: ## Install to PATH (use: uv tool install .)
+	uv tool install .
 
-dev-install: ## Install all dependencies including dev tools
+dev-install: ## Install development dependencies
 	uv sync
 	uv run pre-commit install
 
@@ -27,26 +25,16 @@ format: ## Format code with ruff
 typecheck: ## Run mypy type checker
 	uv run mypy src/
 
-test: ## Run all tests
+test: ## Run tests (use -k for specific tests, --cov for coverage)
 	uv run pytest tests/ -v
-
-test-rounding: ## Run exhaustive rounding error tests
-	uv run pytest tests/test_rounding.py -v
-
-test-coverage: ## Run tests with coverage report
-	uv run pytest tests/ --cov=src/ynab_split --cov-report=html --cov-report=term
 
 pre-commit: ## Run pre-commit hooks on all files
 	uv run pre-commit run --all-files
 
 clean: ## Clean up build artifacts and cache
-	rm -rf .venv
-	rm -rf build/
-	rm -rf dist/
-	rm -rf *.egg-info
+	rm -rf .venv build/ dist/ *.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
 	find . -type d -name ".pytest_cache" -exec rm -rf {} +
 	find . -type d -name ".mypy_cache" -exec rm -rf {} +
 	find . -type d -name ".ruff_cache" -exec rm -rf {} +
@@ -56,17 +44,8 @@ clear-cache: ## Clear category mapping cache
 		sqlite3 ~/.ynab_split/ynab_split.db "DELETE FROM category_mappings; VACUUM;"; \
 		echo "✓ Category mapping cache cleared"; \
 	else \
-		echo "No cache file found at ~/.ynab_split/ynab_split.db"; \
-		echo "Run 'make' or 'ynab-split draft' first to create the database"; \
+		echo "No cache file found"; \
 	fi
 
-run-draft: ## Run draft command with categorization and review (dry-run mode)
-	uv run ynab-split draft --since-last-settlement --categorize --review-all
-
-run-apply: ## Run apply command with categorization and review (creates YNAB transaction)
-	uv run ynab-split apply --since-last-settlement --categorize --review-all
-
-# Development shortcuts
-.PHONY: check fix
 check: lint typecheck ## Run all checks (lint + typecheck)
 fix: format ## Fix formatting and auto-fixable lint issues

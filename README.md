@@ -16,11 +16,11 @@ Shared expenses tracked in Splitwise are settled periodically via Venmo/bank tra
 
 ## Quick Start
 
-**1. Install:**
+**1. Install to PATH:**
 ```bash
 git clone https://github.com/codyjk/YnabSplit.git
 cd YnabSplit
-make dev-install
+uv tool install .
 ```
 
 **2. Configure:**
@@ -31,8 +31,8 @@ Copy `.env.example` to `.env` and add your API keys:
 
 **3. Run:**
 ```bash
-make              # Preview draft (dry-run)
-make run-apply    # Create transaction in YNAB
+ynab-split draft --categorize --review-all    # Preview (dry-run)
+ynab-split apply --categorize --review-all    # Create transaction
 ```
 
 ---
@@ -42,12 +42,16 @@ make run-apply    # Create transaction in YNAB
 ### Commands
 
 ```bash
-make                # Install deps + preview draft (default)
-make run-draft      # Preview transaction without creating it
-make run-apply      # Create transaction in YNAB
-make clear-cache    # Clear category mapping cache
+ynab-split draft [OPTIONS]    # Preview transaction (dry-run)
+ynab-split apply [OPTIONS]    # Create transaction in YNAB
+```
+
+**Development:**
+```bash
+make dev-install    # Install dependencies
 make check          # Run linting + type checking
-make test           # Run test suite
+make test           # Run tests
+make clear-cache    # Clear category mapping cache
 ```
 
 ### CLI Flags
@@ -288,20 +292,19 @@ SQLite database at `~/.ynab_split/ynab_split.db`:
 
 ## Development
 
-**Requirements:**
-- Python 3.13+
-- [uv](https://github.com/astral-sh/uv) package manager
+**Setup:**
+```bash
+make dev-install    # Install dependencies + pre-commit hooks
+```
 
 **Code Quality:**
 ```bash
-make check          # Ruff linting + mypy type checking
+make check          # Linting + type checking
 make format         # Auto-format code
-make test           # Run test suite
-make test-rounding  # Run exhaustive rounding tests (100,000+ cases)
+make test           # Run tests (use -k for specific, --cov for coverage)
 ```
 
-**Pre-commit Hooks:**
-Automatically run on every commit: ruff linting/formatting, mypy, YAML validation, security checks.
+**Pre-commit hooks** run automatically: ruff linting/formatting, mypy, YAML validation, security checks.
 
 ---
 
