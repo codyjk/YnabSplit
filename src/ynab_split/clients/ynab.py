@@ -1,10 +1,13 @@
 """YNAB API client."""
 
 import hashlib
+import logging
 
 import httpx
 
 from ..models import ClearingTransactionDraft, YnabAccount, YnabCategory
+
+logger = logging.getLogger(__name__)
 
 
 class YnabClient:
@@ -119,19 +122,32 @@ class YnabClient:
         Returns:
             The created YNAB transaction ID
         """
+        # Validate that all split lines have categories
+        uncategorized_lines = [
+            line for line in draft.split_lines if line.category_id is None
+        ]
+        if uncategorized_lines:
+            error_msg = (
+                f"Cannot create transaction: {len(uncategorized_lines)} split line(s) "
+                f"are missing category assignments:\n"
+            )
+            for line in uncategorized_lines:
+                error_msg += f"  - {line.memo}\n"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
         # Generate import_id for idempotency (hash of draft_id)
         import_id = self._generate_import_id(draft)
 
         # Build subtransactions (split lines)
         subtransactions = []
         for line in draft.split_lines:
-            subtransactions.append(
-                {
-                    "amount": line.amount_milliunits,
-                    "category_id": line.category_id,
-                    "memo": line.memo,
-                }
-            )
+            subtransaction = {
+                "amount": line.amount_milliunits,
+                "category_id": line.category_id,
+                "memo": line.memo,
+            }
+            subtransactions.append(subtransaction)
 
         # Build main transaction
         transaction = {
@@ -146,11 +162,21 @@ class YnabClient:
             "subtransactions": subtransactions,
         }
 
-        # POST to YNAB
-        response = self.client.post(
-            f"/budgets/{budget_id}/transactions", json={"transaction": transaction}
+        logger.debug(
+            f"Creating YNAB transaction with {len(subtransactions)} split lines"
         )
-        response.raise_for_status()
+        logger.debug(f"Transaction payload: {transaction}")
+
+        # POST to YNAB
+        try:
+            response = self.client.post(
+                f"/budgets/{budget_id}/transactions", json={"transaction": transaction}
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"YNAB API error: {e}")
+            logger.error(f"Response body: {e.response.text}")
+            raise
 
         data = response.json()
         transaction_id: str = data["data"]["transaction"]["id"]
