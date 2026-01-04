@@ -37,28 +37,69 @@ class SettlementService:
         self.settings = settings
         self.db = database
 
-    def fetch_expenses_since_last_settlement(
-        self,
-    ) -> tuple[list[SplitwiseExpense], str]:
+    def get_recent_settlements(self, count: int = 2) -> list[SplitwiseExpense]:
         """
-        Fetch expenses from Splitwise since the last settlement.
+        Get recent settlements from Splitwise.
 
-        Auto-detects whether to use pre-settlement or post-settlement mode.
+        Args:
+            count: Number of recent settlements to fetch
 
         Returns:
-            Tuple of (expenses, mode_description)
+            List of settlement expenses, sorted newest first
         """
         with SplitwiseClient(self.settings.splitwise_api_key) as client:
-            user_id = client.get_current_user()
+            settlements: list[SplitwiseExpense] = client.get_settlement_history(
+                self.settings.splitwise_group_id, count=count
+            )
+            logger.info(f"Fetched {len(settlements)} recent settlements")
+            return settlements
 
-            # Get expenses with auto-detection
-            expenses, mode = client.get_expenses_since_last_settlement(
-                self.settings.splitwise_group_id, user_id
+    def fetch_expenses_for_settlement(
+        self, settlement: SplitwiseExpense, previous_settlement: SplitwiseExpense | None
+    ) -> list[SplitwiseExpense]:
+        """
+        Fetch expenses for a specific settlement.
+
+        Gets expenses between the previous settlement and the selected settlement.
+
+        Args:
+            settlement: The settlement to fetch expenses for
+            previous_settlement: The settlement before this one (or None if first)
+
+        Returns:
+            List of expenses for this settlement period
+        """
+        with SplitwiseClient(self.settings.splitwise_api_key) as client:
+            settlement_date = settlement.date.date()
+
+            if previous_settlement:
+                # Fetch expenses between previous and current settlement
+                previous_date = previous_settlement.date.date()
+                logger.info(
+                    f"Fetching expenses between {previous_date} and {settlement_date}"
+                )
+                expenses = client.get_expenses(
+                    group_id=self.settings.splitwise_group_id,
+                    dated_after=previous_date,
+                    dated_before=settlement_date,
+                    limit=1000,
+                )
+            else:
+                # First settlement - get all expenses before it
+                logger.info(f"Fetching all expenses before {settlement_date}")
+                expenses = client.get_expenses(
+                    group_id=self.settings.splitwise_group_id,
+                    dated_before=settlement_date,
+                    limit=1000,
+                )
+
+            # Filter out payment transactions
+            regular_expenses = [exp for exp in expenses if not exp.payment]
+            logger.info(
+                f"Found {len(regular_expenses)} expenses for settlement on {settlement_date}"
             )
 
-            logger.info(f"Fetched {len(expenses)} expenses {mode}")
-
-            return expenses, mode
+            return regular_expenses
 
     def create_draft_transaction(
         self, expenses: list[SplitwiseExpense]

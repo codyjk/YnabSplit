@@ -1,6 +1,7 @@
 """Interactive UI components for expense categorization."""
 
 import logging
+from decimal import Decimal
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -184,3 +185,66 @@ def confirm_category(
     response = input("   Confirm? [Y/n] ").strip().lower()
 
     return response in ("", "y", "yes")
+
+
+def select_settlement_interactive(
+    settlements: list,
+) -> int | None:
+    """
+    Interactive settlement selection.
+
+    Args:
+        settlements: List of SplitwiseExpense settlement objects, sorted newest first
+
+    Returns:
+        Index of selected settlement (0-based), or None to cancel
+    """
+    if not settlements:
+        print("\n⚠️  No settlements found")
+        return None
+
+    print("\n📅 Recent Settlements:\n")
+
+    for idx, settlement in enumerate(settlements):
+        # settlement is a SplitwiseExpense with payment=True
+        date_str = settlement.date.strftime("%Y-%m-%d %H:%M")
+        amount = settlement.cost
+
+        # Find who paid who
+        payer_id = None
+        receiver_id = None
+        for user in settlement.users:
+            if user.paid_share > Decimal("0"):
+                payer_id = user.user_id
+            if user.owed_share > Decimal("0"):
+                receiver_id = user.user_id
+
+        # Simple display (could be enhanced with user names)
+        direction = (
+            f"User {payer_id} → User {receiver_id}"
+            if payer_id and receiver_id
+            else "Unknown"
+        )
+
+        print(f"  [{idx + 1}] {date_str}")
+        print(f"      Amount: ${amount}")
+        print(f"      Direction: {direction}")
+        print()
+
+    try:
+        response = input("Select settlement [1-2, or q to quit]: ").strip().lower()
+
+        if response in ("q", "quit", ""):
+            return None
+
+        selection = int(response) - 1  # Convert to 0-based index
+
+        if 0 <= selection < len(settlements):
+            return selection
+        else:
+            print("❌ Invalid selection")
+            return None
+
+    except (ValueError, KeyboardInterrupt, EOFError):
+        print("\n⏭️  Cancelled")
+        return None

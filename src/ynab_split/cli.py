@@ -13,7 +13,11 @@ from .config import load_settings
 from .db import Database
 from .mapper import CategoryMapper
 from .service import SettlementService
-from .ui import confirm_category, select_category_interactive
+from .ui import (
+    confirm_category,
+    select_category_interactive,
+    select_settlement_interactive,
+)
 
 app = typer.Typer(
     name="ynab-split",
@@ -66,15 +70,40 @@ def draft(
         # Create service
         service = SettlementService(settings, db)
 
-        # Fetch expenses
-        console.print("\n[bold blue]Fetching expenses from Splitwise...[/bold blue]")
-        expenses, mode = service.fetch_expenses_since_last_settlement()
+        # Get recent settlements
+        console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
+        settlements = service.get_recent_settlements(count=2)
 
-        if not expenses:
-            console.print("[yellow]No expenses found to process.[/yellow]")
+        if not settlements:
+            console.print("[yellow]No settlements found.[/yellow]")
             return
 
-        console.print(f"[green]Found {len(expenses)} expenses {mode}[/green]\n")
+        # Let user select settlement
+        selected_idx = select_settlement_interactive(settlements)
+        if selected_idx is None:
+            console.print("[yellow]No settlement selected.[/yellow]")
+            return
+
+        selected_settlement = settlements[selected_idx]
+        previous_settlement = (
+            settlements[selected_idx + 1]
+            if selected_idx + 1 < len(settlements)
+            else None
+        )
+
+        # Fetch expenses for selected settlement
+        console.print(
+            f"\n[bold blue]Fetching expenses for settlement on {selected_settlement.date.date()}...[/bold blue]"
+        )
+        expenses = service.fetch_expenses_for_settlement(
+            selected_settlement, previous_settlement
+        )
+
+        if not expenses:
+            console.print("[yellow]No expenses found for this settlement.[/yellow]")
+            return
+
+        console.print(f"[green]Found {len(expenses)} expenses[/green]\n")
 
         # Create draft
         console.print("[bold blue]Computing split transaction...[/bold blue]")
@@ -290,15 +319,40 @@ def apply(
         # Create service
         service = SettlementService(settings, db)
 
-        # Fetch expenses
-        console.print("\n[bold blue]Fetching expenses from Splitwise...[/bold blue]")
-        expenses, mode = service.fetch_expenses_since_last_settlement()
+        # Get recent settlements
+        console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
+        settlements = service.get_recent_settlements(count=2)
 
-        if not expenses:
-            console.print("[yellow]No expenses found to process.[/yellow]")
+        if not settlements:
+            console.print("[yellow]No settlements found.[/yellow]")
             return
 
-        console.print(f"[green]Found {len(expenses)} expenses {mode}[/green]\n")
+        # Let user select settlement
+        selected_idx = select_settlement_interactive(settlements)
+        if selected_idx is None:
+            console.print("[yellow]No settlement selected.[/yellow]")
+            return
+
+        selected_settlement = settlements[selected_idx]
+        previous_settlement = (
+            settlements[selected_idx + 1]
+            if selected_idx + 1 < len(settlements)
+            else None
+        )
+
+        # Fetch expenses for selected settlement
+        console.print(
+            f"\n[bold blue]Fetching expenses for settlement on {selected_settlement.date.date()}...[/bold blue]"
+        )
+        expenses = service.fetch_expenses_for_settlement(
+            selected_settlement, previous_settlement
+        )
+
+        if not expenses:
+            console.print("[yellow]No expenses found for this settlement.[/yellow]")
+            return
+
+        console.print(f"[green]Found {len(expenses)} expenses[/green]\n")
 
         # Create draft
         console.print("[bold blue]Computing split transaction...[/bold blue]")
@@ -417,15 +471,40 @@ def fix_import_id(
         # Create service
         service = SettlementService(settings, db)
 
-        # Fetch expenses
-        console.print("\n[bold blue]Fetching expenses from Splitwise...[/bold blue]")
-        expenses, mode = service.fetch_expenses_since_last_settlement()
+        # Get recent settlements
+        console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
+        settlements = service.get_recent_settlements(count=2)
 
-        if not expenses:
-            console.print("[yellow]No expenses found to process.[/yellow]")
+        if not settlements:
+            console.print("[yellow]No settlements found.[/yellow]")
             return
 
-        console.print(f"[green]Found {len(expenses)} expenses {mode}[/green]\n")
+        # Let user select settlement
+        selected_idx = select_settlement_interactive(settlements)
+        if selected_idx is None:
+            console.print("[yellow]No settlement selected.[/yellow]")
+            return
+
+        selected_settlement = settlements[selected_idx]
+        previous_settlement = (
+            settlements[selected_idx + 1]
+            if selected_idx + 1 < len(settlements)
+            else None
+        )
+
+        # Fetch expenses for selected settlement
+        console.print(
+            f"\n[bold blue]Fetching expenses for settlement on {selected_settlement.date.date()}...[/bold blue]"
+        )
+        expenses = service.fetch_expenses_for_settlement(
+            selected_settlement, previous_settlement
+        )
+
+        if not expenses:
+            console.print("[yellow]No expenses found for this settlement.[/yellow]")
+            return
+
+        console.print(f"[green]Found {len(expenses)} expenses[/green]\n")
 
         # Create draft to compute the correct import_id
         console.print("[bold blue]Computing deterministic import_id...[/bold blue]")
