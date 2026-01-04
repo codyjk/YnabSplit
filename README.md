@@ -323,8 +323,10 @@ make clear-cache
 
 **Verbose logging:**
 ```bash
-ynab-split draft --verbose
+ynab-split draft --verbose  # Shows DEBUG logs including HTTP requests
 ```
+
+By default, HTTP request logs are hidden. Use `--verbose` to see all network requests to Splitwise, YNAB, and OpenAI APIs.
 
 ---
 

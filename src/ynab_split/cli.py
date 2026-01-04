@@ -12,6 +12,7 @@ from .clients.ynab import YnabClient
 from .config import load_settings
 from .db import Database
 from .mapper import CategoryMapper
+from .models import SplitwiseExpense
 from .service import SettlementService
 from .ui import (
     confirm_category,
@@ -34,6 +35,9 @@ def setup_logging(verbose: bool = False):
         level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
+    # Downgrade httpx logging to DEBUG (network requests are too noisy at INFO)
+    logging.getLogger("httpx").setLevel(logging.DEBUG if verbose else logging.WARNING)
+
 
 @app.command()
 def draft(
@@ -48,6 +52,11 @@ def draft(
     ),
     review_all: bool = typer.Option(
         False, "--review-all", help="Interactive review for ALL categories"
+    ),
+    manually_select_settlement: bool = typer.Option(
+        False,
+        "--manually-select-settlement",
+        help="Manually select settlement (otherwise auto-detects from YNAB)",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
@@ -70,7 +79,7 @@ def draft(
         # Create service
         service = SettlementService(settings, db)
 
-        # Get recent settlements (fetch 3 to ensure we have previous settlement for filtering)
+        # Get recent settlements
         console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
         settlements = service.get_recent_settlements(count=3)
 
@@ -78,17 +87,53 @@ def draft(
             console.print("[yellow]No settlements found.[/yellow]")
             return
 
-        # Check which settlements are already in YNAB
-        console.print("[dim]Checking which settlements are already in YNAB...[/dim]")
-        already_in_ynab = service.check_settlements_in_ynab(settlements)
+        # Auto-detect or manual selection
+        selected_settlement: SplitwiseExpense
+        if manually_select_settlement:
+            # User explicitly requested manual selection
+            console.print(
+                "[dim]Checking which settlements are already in YNAB...[/dim]"
+            )
+            already_in_ynab = service.check_settlements_in_ynab(settlements)
 
-        # Let user select settlement
-        selected_idx = select_settlement_interactive(settlements, already_in_ynab)
-        if selected_idx is None:
-            console.print("[yellow]No settlement selected.[/yellow]")
-            return
+            selected_idx = select_settlement_interactive(settlements, already_in_ynab)
+            if selected_idx is None:
+                console.print("[yellow]No settlement selected.[/yellow]")
+                return
 
-        selected_settlement = settlements[selected_idx]
+            selected_settlement = settlements[selected_idx]
+        else:
+            # Auto-detect most recent processed settlement
+            console.print(
+                "[dim]Auto-detecting most recent processed settlement...[/dim]"
+            )
+            auto_detected = service.get_most_recent_processed_settlement(settlements)
+
+            if auto_detected is None:
+                # First run - no processed settlements found
+                console.print(
+                    "[yellow]No processed settlements found in YNAB (first run?).[/yellow]"
+                )
+                console.print(
+                    "[dim]Please select the last settlement you logged in YNAB.[/dim]\n"
+                )
+
+                # Fall back to manual selection
+                already_in_ynab = service.check_settlements_in_ynab(settlements)
+                selected_idx = select_settlement_interactive(
+                    settlements, already_in_ynab
+                )
+                if selected_idx is None:
+                    console.print("[yellow]No settlement selected.[/yellow]")
+                    return
+
+                selected_settlement = settlements[selected_idx]
+            else:
+                selected_settlement = auto_detected
+                console.print(
+                    f"[green]Using most recent processed settlement: "
+                    f"{selected_settlement.date.date()}[/green]"
+                )
 
         # Fetch ALL expenses AFTER selected settlement (no upper bound)
         console.print(
@@ -97,7 +142,7 @@ def draft(
         expenses = service.fetch_expenses_after_settlement(selected_settlement)
 
         if not expenses:
-            console.print("[yellow]No expenses found for this settlement.[/yellow]")
+            console.print("[yellow]No expenses found AFTER this settlement.[/yellow]")
             return
 
         console.print(f"[green]Found {len(expenses)} expenses[/green]\n")
@@ -297,6 +342,11 @@ def apply(
     review_all: bool = typer.Option(
         False, "--review-all", help="Interactive review for ALL categories"
     ),
+    manually_select_settlement: bool = typer.Option(
+        False,
+        "--manually-select-settlement",
+        help="Manually select settlement (otherwise auto-detects from YNAB)",
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
@@ -316,7 +366,7 @@ def apply(
         # Create service
         service = SettlementService(settings, db)
 
-        # Get recent settlements (fetch 3 to ensure we have previous settlement for filtering)
+        # Get recent settlements
         console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
         settlements = service.get_recent_settlements(count=3)
 
@@ -324,17 +374,53 @@ def apply(
             console.print("[yellow]No settlements found.[/yellow]")
             return
 
-        # Check which settlements are already in YNAB
-        console.print("[dim]Checking which settlements are already in YNAB...[/dim]")
-        already_in_ynab = service.check_settlements_in_ynab(settlements)
+        # Auto-detect or manual selection
+        selected_settlement: SplitwiseExpense
+        if manually_select_settlement:
+            # User explicitly requested manual selection
+            console.print(
+                "[dim]Checking which settlements are already in YNAB...[/dim]"
+            )
+            already_in_ynab = service.check_settlements_in_ynab(settlements)
 
-        # Let user select settlement
-        selected_idx = select_settlement_interactive(settlements, already_in_ynab)
-        if selected_idx is None:
-            console.print("[yellow]No settlement selected.[/yellow]")
-            return
+            selected_idx = select_settlement_interactive(settlements, already_in_ynab)
+            if selected_idx is None:
+                console.print("[yellow]No settlement selected.[/yellow]")
+                return
 
-        selected_settlement = settlements[selected_idx]
+            selected_settlement = settlements[selected_idx]
+        else:
+            # Auto-detect most recent processed settlement
+            console.print(
+                "[dim]Auto-detecting most recent processed settlement...[/dim]"
+            )
+            auto_detected = service.get_most_recent_processed_settlement(settlements)
+
+            if auto_detected is None:
+                # First run - no processed settlements found
+                console.print(
+                    "[yellow]No processed settlements found in YNAB (first run?).[/yellow]"
+                )
+                console.print(
+                    "[dim]Please select the last settlement you logged in YNAB.[/dim]\n"
+                )
+
+                # Fall back to manual selection
+                already_in_ynab = service.check_settlements_in_ynab(settlements)
+                selected_idx = select_settlement_interactive(
+                    settlements, already_in_ynab
+                )
+                if selected_idx is None:
+                    console.print("[yellow]No settlement selected.[/yellow]")
+                    return
+
+                selected_settlement = settlements[selected_idx]
+            else:
+                selected_settlement = auto_detected
+                console.print(
+                    f"[green]Using most recent processed settlement: "
+                    f"{selected_settlement.date.date()}[/green]"
+                )
 
         # Fetch ALL expenses AFTER selected settlement (no upper bound)
         console.print(
@@ -343,7 +429,7 @@ def apply(
         expenses = service.fetch_expenses_after_settlement(selected_settlement)
 
         if not expenses:
-            console.print("[yellow]No expenses found for this settlement.[/yellow]")
+            console.print("[yellow]No expenses found AFTER this settlement.[/yellow]")
             return
 
         console.print(f"[green]Found {len(expenses)} expenses[/green]\n")
@@ -446,6 +532,11 @@ def apply(
 
 @app.command()
 def fix_import_id(
+    manually_select_settlement: bool = typer.Option(
+        True,  # Default to True for fix_import_id since it's a maintenance command
+        "--manually-select-settlement",
+        help="Manually select settlement (otherwise auto-detects from YNAB)",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """
@@ -465,7 +556,7 @@ def fix_import_id(
         # Create service
         service = SettlementService(settings, db)
 
-        # Get recent settlements (fetch 3 to ensure we have previous settlement for filtering)
+        # Get recent settlements
         console.print("\n[bold blue]Fetching recent settlements...[/bold blue]")
         settlements = service.get_recent_settlements(count=3)
 
@@ -473,17 +564,53 @@ def fix_import_id(
             console.print("[yellow]No settlements found.[/yellow]")
             return
 
-        # Check which settlements are already in YNAB
-        console.print("[dim]Checking which settlements are already in YNAB...[/dim]")
-        already_in_ynab = service.check_settlements_in_ynab(settlements)
+        # Auto-detect or manual selection
+        selected_settlement: SplitwiseExpense
+        if manually_select_settlement:
+            # User explicitly requested manual selection
+            console.print(
+                "[dim]Checking which settlements are already in YNAB...[/dim]"
+            )
+            already_in_ynab = service.check_settlements_in_ynab(settlements)
 
-        # Let user select settlement
-        selected_idx = select_settlement_interactive(settlements, already_in_ynab)
-        if selected_idx is None:
-            console.print("[yellow]No settlement selected.[/yellow]")
-            return
+            selected_idx = select_settlement_interactive(settlements, already_in_ynab)
+            if selected_idx is None:
+                console.print("[yellow]No settlement selected.[/yellow]")
+                return
 
-        selected_settlement = settlements[selected_idx]
+            selected_settlement = settlements[selected_idx]
+        else:
+            # Auto-detect most recent processed settlement
+            console.print(
+                "[dim]Auto-detecting most recent processed settlement...[/dim]"
+            )
+            auto_detected = service.get_most_recent_processed_settlement(settlements)
+
+            if auto_detected is None:
+                # First run - no processed settlements found
+                console.print(
+                    "[yellow]No processed settlements found in YNAB (first run?).[/yellow]"
+                )
+                console.print(
+                    "[dim]Please select the last settlement you logged in YNAB.[/dim]\n"
+                )
+
+                # Fall back to manual selection
+                already_in_ynab = service.check_settlements_in_ynab(settlements)
+                selected_idx = select_settlement_interactive(
+                    settlements, already_in_ynab
+                )
+                if selected_idx is None:
+                    console.print("[yellow]No settlement selected.[/yellow]")
+                    return
+
+                selected_settlement = settlements[selected_idx]
+            else:
+                selected_settlement = auto_detected
+                console.print(
+                    f"[green]Using most recent processed settlement: "
+                    f"{selected_settlement.date.date()}[/green]"
+                )
 
         # Fetch ALL expenses AFTER selected settlement (no upper bound)
         console.print(
@@ -492,7 +619,7 @@ def fix_import_id(
         expenses = service.fetch_expenses_after_settlement(selected_settlement)
 
         if not expenses:
-            console.print("[yellow]No expenses found for this settlement.[/yellow]")
+            console.print("[yellow]No expenses found AFTER this settlement.[/yellow]")
             return
 
         console.print(f"[green]Found {len(expenses)} expenses[/green]\n")
