@@ -63,8 +63,8 @@ clear-cache: ## Clear category mapping cache
 run-draft: ## Run draft command with categorization and review (dry-run mode)
 	uv run ynab-split draft --since-last-settlement --categorize --review-all
 
-run-apply: ## Run apply command with categorization (creates YNAB transaction)
-	uv run ynab-split apply --since-last-settlement --categorize
+run-apply: ## Run apply command with categorization and review (creates YNAB transaction)
+	uv run ynab-split apply --since-last-settlement --categorize --review-all
 
 # Development shortcuts
 .PHONY: check fix
