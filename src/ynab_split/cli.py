@@ -78,8 +78,12 @@ def draft(
             console.print("[yellow]No settlements found.[/yellow]")
             return
 
+        # Check which settlements are already in YNAB
+        console.print("[dim]Checking which settlements are already in YNAB...[/dim]")
+        already_in_ynab = service.check_settlements_in_ynab(settlements)
+
         # Let user select settlement
-        selected_idx = select_settlement_interactive(settlements)
+        selected_idx = select_settlement_interactive(settlements, already_in_ynab)
         if selected_idx is None:
             console.print("[yellow]No settlement selected.[/yellow]")
             return
@@ -324,8 +328,12 @@ def apply(
             console.print("[yellow]No settlements found.[/yellow]")
             return
 
+        # Check which settlements are already in YNAB
+        console.print("[dim]Checking which settlements are already in YNAB...[/dim]")
+        already_in_ynab = service.check_settlements_in_ynab(settlements)
+
         # Let user select settlement
-        selected_idx = select_settlement_interactive(settlements)
+        selected_idx = select_settlement_interactive(settlements, already_in_ynab)
         if selected_idx is None:
             console.print("[yellow]No settlement selected.[/yellow]")
             return
@@ -473,8 +481,12 @@ def fix_import_id(
             console.print("[yellow]No settlements found.[/yellow]")
             return
 
+        # Check which settlements are already in YNAB
+        console.print("[dim]Checking which settlements are already in YNAB...[/dim]")
+        already_in_ynab = service.check_settlements_in_ynab(settlements)
+
         # Let user select settlement
-        selected_idx = select_settlement_interactive(settlements)
+        selected_idx = select_settlement_interactive(settlements, already_in_ynab)
         if selected_idx is None:
             console.print("[yellow]No settlement selected.[/yellow]")
             return

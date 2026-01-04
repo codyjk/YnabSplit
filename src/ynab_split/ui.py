@@ -189,12 +189,14 @@ def confirm_category(
 
 def select_settlement_interactive(
     settlements: list,
+    already_in_ynab: list[bool] | None = None,
 ) -> int | None:
     """
     Interactive settlement selection.
 
     Args:
         settlements: List of SplitwiseExpense settlement objects, sorted newest first
+        already_in_ynab: Optional list of booleans indicating which settlements exist in YNAB
 
     Returns:
         Index of selected settlement (0-based), or None to cancel
@@ -203,7 +205,8 @@ def select_settlement_interactive(
         print("\n⚠️  No settlements found")
         return None
 
-    print("\n📅 Recent Settlements:\n")
+    print("\n📅 Recent Settlements:")
+    print("Pick the last settlement you logged in YNAB (this is your starting point)\n")
 
     for idx, settlement in enumerate(settlements):
         # settlement is a SplitwiseExpense with payment=True
@@ -226,7 +229,12 @@ def select_settlement_interactive(
             else "Unknown"
         )
 
-        print(f"  [{idx + 1}] {date_str}")
+        # Show indicator if already in YNAB
+        in_ynab_marker = ""
+        if already_in_ynab and idx < len(already_in_ynab) and already_in_ynab[idx]:
+            in_ynab_marker = " ✓ (in YNAB)"
+
+        print(f"  [{idx + 1}] {date_str}{in_ynab_marker}")
         print(f"      Amount: ${amount}")
         print(f"      Direction: {direction}")
         print()

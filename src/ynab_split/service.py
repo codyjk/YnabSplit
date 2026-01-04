@@ -6,7 +6,7 @@ and reconciliation logic in a functional, immutable way.
 
 import hashlib
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from .categorizer import ExpenseCategorizer
 from .clients.openai_client import CategoryClassifier
@@ -53,6 +53,55 @@ class SettlementService:
             )
             logger.info(f"Fetched {len(settlements)} recent settlements")
             return settlements
+
+    def check_settlements_in_ynab(
+        self, settlements: list[SplitwiseExpense]
+    ) -> list[bool]:
+        """
+        Check which settlements already exist in YNAB.
+
+        Args:
+            settlements: List of settlements to check
+
+        Returns:
+            List of booleans, True if settlement exists in YNAB
+        """
+        results = []
+        with YnabClient(self.settings.ynab_access_token) as client:
+            for settlement in settlements:
+                # Fetch expenses for this settlement to compute import_id
+                settlement_date = settlement.date.date()
+                # We need at least some expenses to create a draft
+                # Just check if a YS- transaction exists on this date
+                since_date = (settlement_date - timedelta(days=7)).isoformat()
+
+                try:
+                    response = client.client.get(
+                        f"/budgets/{self.settings.ynab_budget_id}/transactions",
+                        params={"since_date": since_date},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                    # Look for YS- transaction on this settlement date
+                    found = False
+                    for transaction in data.get("data", {}).get("transactions", []):
+                        tx_import_id = transaction.get("import_id")
+                        tx_date = transaction.get("date", "")
+                        if (
+                            tx_import_id
+                            and tx_import_id.startswith("YS-")
+                            and tx_date == str(settlement_date)
+                        ):
+                            found = True
+                            break
+
+                    results.append(found)
+                except Exception:
+                    # If we can't check, assume it doesn't exist
+                    results.append(False)
+
+        return results
 
     def fetch_expenses_for_settlement(
         self, settlement: SplitwiseExpense, next_settlement: SplitwiseExpense | None
