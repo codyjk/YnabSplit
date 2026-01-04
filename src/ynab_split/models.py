@@ -3,7 +3,6 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -98,7 +97,7 @@ class ProposedSplitLine(BaseModel):
 class ClearingTransactionDraft(BaseModel):
     """A draft clearing transaction for YNAB."""
 
-    draft_id: str = Field(default_factory=lambda: str(uuid4()))
+    draft_id: str  # Deterministic ID based on expense_ids + settlement_date
     settlement_date: date
     payee_name: str
     account_id: str

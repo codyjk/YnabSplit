@@ -1,5 +1,6 @@
 """OpenAI GPT client for category classification."""
 
+import json
 import logging
 
 from openai import OpenAI
@@ -77,8 +78,6 @@ Select the best category for this expense."""
         )
 
         # Parse response
-        import json
-
         result_json = json.loads(response.choices[0].message.content or "{}")
 
         logger.info(

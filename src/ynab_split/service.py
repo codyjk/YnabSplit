@@ -4,7 +4,9 @@ This module provides a higher-level API that composes the lower-level clients
 and reconciliation logic in a functional, immutable way.
 """
 
+import hashlib
 import logging
+from datetime import date
 
 from .categorizer import ExpenseCategorizer
 from .clients.openai_client import CategoryClassifier
@@ -93,8 +95,13 @@ class SettlementService:
         # Determine settlement date (use most recent expense date)
         settlement_date = max(exp.date for exp in expenses).date()
 
+        # Compute deterministic draft_id
+        expense_ids = [exp.id for exp in expenses]
+        draft_id = compute_deterministic_draft_id(expense_ids, settlement_date)
+
         # Create draft
         draft = ClearingTransactionDraft(
+            draft_id=draft_id,
             settlement_date=settlement_date,
             payee_name=self.settings.clearing_payee_name,
             account_id=self.settings.ynab_clearing_account_id,
@@ -102,7 +109,7 @@ class SettlementService:
             split_lines=split_lines,
             metadata={
                 "splitwise_group_id": self.settings.splitwise_group_id,
-                "expense_ids": [exp.id for exp in expenses],
+                "expense_ids": expense_ids,
                 "user_id": user_id,
             },
         )
@@ -251,6 +258,33 @@ class SettlementService:
         return transaction_id
 
 
+def compute_deterministic_draft_id(
+    expense_ids: list[int], settlement_date: date
+) -> str:
+    """
+    Compute deterministic draft ID from expense IDs and settlement date.
+
+    This ensures the same settlement always generates the same import_id in YNAB,
+    allowing proper idempotency checking.
+
+    Args:
+        expense_ids: List of Splitwise expense IDs
+        settlement_date: The settlement date
+
+    Returns:
+        Deterministic draft ID (hex string)
+    """
+    # Sort expense IDs for consistency
+    sorted_ids = sorted(expense_ids)
+
+    # Create stable representation: date|id1|id2|id3
+    parts = [settlement_date.isoformat()] + [str(exp_id) for exp_id in sorted_ids]
+    combined = "|".join(parts)
+
+    # Return full SHA256 hash as draft_id
+    return hashlib.sha256(combined.encode()).hexdigest()
+
+
 def compute_draft_hash_from_draft(draft: ClearingTransactionDraft) -> str:
     """
     Compute hash from draft transaction.
@@ -261,8 +295,6 @@ def compute_draft_hash_from_draft(draft: ClearingTransactionDraft) -> str:
     parts = []
     for line in sorted(draft.split_lines, key=lambda x: x.splitwise_expense_id):
         parts.append(f"{line.splitwise_expense_id}:{line.amount_milliunits}")
-
-    import hashlib
 
     combined = "|".join(parts)
     return hashlib.sha256(combined.encode()).hexdigest()

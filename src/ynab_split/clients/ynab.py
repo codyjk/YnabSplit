@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+from datetime import timedelta
 
 import httpx
 
@@ -223,8 +224,6 @@ class YnabClient:
 
         # Fetch transactions from YNAB around the settlement date
         # Check ±7 days to account for timing differences
-        from datetime import timedelta
-
         since_date = (draft.settlement_date - timedelta(days=7)).isoformat()
 
         try:

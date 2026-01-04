@@ -207,8 +207,6 @@ class SplitwiseClient:
         Returns:
             Tuple of (expenses, mode description)
         """
-        from datetime import datetime
-
         logger.info("=== ENTERING get_expenses_since_last_settlement ===")
 
         # Get settlement history
