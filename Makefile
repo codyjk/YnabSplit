@@ -8,8 +8,12 @@ help: ## Show this help message
 	@echo "Available targets:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install to PATH (use: uv tool install .)
+install: clean ## Install to PATH (uninstalls old version first)
+	@echo "Uninstalling old version..."
+	@uv tool uninstall ynab-split 2>/dev/null || true
+	@echo "Installing fresh version..."
 	uv tool install .
+	@echo "✓ Installation complete"
 
 dev-install: ## Install development dependencies
 	uv sync
@@ -31,13 +35,15 @@ test: ## Run tests (use -k for specific tests, --cov for coverage)
 pre-commit: ## Run pre-commit hooks on all files
 	uv run pre-commit run --all-files
 
-clean: ## Clean up build artifacts and cache
-	rm -rf .venv build/ dist/ *.egg-info
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-	find . -type d -name ".pytest_cache" -exec rm -rf {} +
-	find . -type d -name ".mypy_cache" -exec rm -rf {} +
-	find . -type d -name ".ruff_cache" -exec rm -rf {} +
+clean: ## Clean up build artifacts, cache, and installed tool
+	@echo "Cleaning build artifacts..."
+	@rm -rf build/ dist/ *.egg-info src/*.egg-info 2>/dev/null || true
+	@find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
+	@echo "✓ Clean complete"
 
 clear-cache: ## Clear category mapping cache
 	@if [ -f ~/.ynab_split/ynab_split.db ]; then \
