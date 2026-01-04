@@ -40,6 +40,9 @@ def draft(
     review: bool = typer.Option(
         False, "--review", "-r", help="Interactive review for low-confidence categories"
     ),
+    review_all: bool = typer.Option(
+        False, "--review-all", help="Interactive review for ALL categories"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """
@@ -93,13 +96,15 @@ def draft(
             draft = service.categorize_draft(draft)
 
             # Interactive review for low-confidence categories
-            if review:
+            if review or review_all:
                 console.print("\n[bold blue]Reviewing categorizations...[/bold blue]\n")
                 categories = service.get_ynab_categories()
                 mapper = CategoryMapper(db)
 
                 for line in draft.split_lines:
-                    if line.needs_review and line.category_id:
+                    # Review all if --review-all, otherwise only review flagged items
+                    should_review = review_all or (review and line.needs_review)
+                    if should_review and line.category_id:
                         # Show current category and ask for confirmation
                         if not confirm_category(
                             line.category_id, categories, line.memo
@@ -142,7 +147,9 @@ def draft(
         apply_cmd = "ynab-split apply"
         if categorize:
             apply_cmd += " --categorize"
-        if review:
+        if review_all:
+            apply_cmd += " --review-all"
+        elif review:
             apply_cmd += " --review"
 
         console.print(
@@ -160,33 +167,50 @@ def draft(
             db.close()
 
 
+def format_money(amount: float, use_color: bool = True) -> str:
+    """
+    Format money in accounting style.
+
+    Negative amounts use parentheses: ($85.02)
+    Positive amounts have no sign: $85.02
+    """
+    abs_amount = abs(amount)
+    if amount < 0:
+        formatted = (
+            f"($[red]{abs_amount:,.2f}[/red])" if use_color else f"(${abs_amount:,.2f})"
+        )
+    else:
+        formatted = (
+            f"[green]${abs_amount:,.2f}[/green]" if use_color else f"${abs_amount:,.2f}"
+        )
+    return formatted
+
+
 def display_draft(draft, show_confidence: bool = False):
     """Display a draft transaction in a nice table format."""
+    total_amount = draft.total_amount_milliunits / 1000
+
     console.print("\n[bold]Draft Clearing Transaction:[/bold]")
     console.print(f"  Date: {draft.settlement_date}")
     console.print(f"  Payee: {draft.payee_name}")
     console.print(
-        f"  Total: ${draft.total_amount_milliunits / 1000:.2f} "
-        f"({'inflow' if draft.total_amount_milliunits > 0 else 'outflow'})"
+        f"  Total: {format_money(total_amount)} "
+        f"({'inflow' if total_amount > 0 else 'outflow'})"
     )
     console.print()
 
     # Create table for split lines
     table = Table(title="Split Lines", show_header=True, header_style="bold magenta")
-    table.add_column("ID", style="dim")
-    table.add_column("Description", style="cyan")
-    table.add_column("Amount", justify="right")
-    table.add_column("Category", style="yellow")
+    table.add_column("ID", style="dim", width=10)
+    table.add_column("Description", style="cyan", width=40)
+    table.add_column("Amount", justify="right", width=12)
+    table.add_column("Category", style="yellow", no_wrap=False)
     if show_confidence:
-        table.add_column("Confidence", justify="center", style="dim")
+        table.add_column("Confidence", justify="center", style="dim", width=10)
 
     for line in draft.split_lines:
         amount = line.amount_milliunits / 1000
-        amount_str = f"${amount:.2f}"
-        if amount < 0:
-            amount_str = f"[red]{amount_str}[/red]"
-        else:
-            amount_str = f"[green]+{amount_str}[/green]"
+        amount_str = format_money(amount)
 
         # Extract expense description from memo
         desc = line.memo.replace("Splitwise: ", "").split(" (exp_")[0]
@@ -215,7 +239,7 @@ def display_draft(draft, show_confidence: bool = False):
     console.print()
     console.print("[bold]Summary:[/bold]")
     console.print(f"  Total split lines: {len(draft.split_lines)}")
-    console.print(f"  Net amount: ${draft.total_amount_milliunits / 1000:.2f}")
+    console.print(f"  Net amount: {format_money(draft.total_amount_milliunits / 1000)}")
 
     # Verification
     computed_total = sum(line.amount_milliunits for line in draft.split_lines)
@@ -238,6 +262,9 @@ def apply(
     ),
     review: bool = typer.Option(
         False, "--review", "-r", help="Interactive review for low-confidence categories"
+    ),
+    review_all: bool = typer.Option(
+        False, "--review-all", help="Interactive review for ALL categories"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -290,13 +317,15 @@ def apply(
             draft = service.categorize_draft(draft)
 
             # Interactive review for low-confidence categories
-            if review:
+            if review or review_all:
                 console.print("\n[bold blue]Reviewing categorizations...[/bold blue]\n")
                 categories = service.get_ynab_categories()
                 mapper = CategoryMapper(db)
 
                 for line in draft.split_lines:
-                    if line.needs_review and line.category_id:
+                    # Review all if --review-all, otherwise only review flagged items
+                    should_review = review_all or (review and line.needs_review)
+                    if should_review and line.category_id:
                         # Show current category and ask for confirmation
                         if not confirm_category(
                             line.category_id, categories, line.memo

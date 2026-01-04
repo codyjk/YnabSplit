@@ -109,7 +109,7 @@ class ExpenseCategorizer:
             split_line.confidence = confidence
 
             # Flag for review if confidence is low
-            if confidence is not None and confidence < 0.7:
+            if confidence is not None and confidence < 0.9:
                 split_line.needs_review = True
                 logger.warning(
                     f"Low confidence ({confidence:.2f}) for '{split_line.memo}', "

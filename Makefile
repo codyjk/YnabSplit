@@ -51,8 +51,17 @@ clean: ## Clean up build artifacts and cache
 	find . -type d -name ".mypy_cache" -exec rm -rf {} +
 	find . -type d -name ".ruff_cache" -exec rm -rf {} +
 
-run-draft: ## Run draft command with categorization (dry-run mode)
-	uv run ynab-split draft --since-last-settlement --categorize
+clear-cache: ## Clear category mapping cache
+	@if [ -f ~/.ynab_split/ynab_split.db ]; then \
+		sqlite3 ~/.ynab_split/ynab_split.db "DELETE FROM category_mappings; VACUUM;"; \
+		echo "✓ Category mapping cache cleared"; \
+	else \
+		echo "No cache file found at ~/.ynab_split/ynab_split.db"; \
+		echo "Run 'make' or 'ynab-split draft' first to create the database"; \
+	fi
+
+run-draft: ## Run draft command with categorization and review (dry-run mode)
+	uv run ynab-split draft --since-last-settlement --categorize --review-all
 
 run-apply: ## Run apply command with categorization (creates YNAB transaction)
 	uv run ynab-split apply --since-last-settlement --categorize
