@@ -112,7 +112,7 @@ graph TB
     end
 
     subgraph "Service Layer"
-        Service[SettlementService<br/>fetch_expenses_since_last_settlement<br/>create_draft_transaction<br/>categorize_draft<br/>apply_draft]
+        Service[SettlementService<br/>get_most_recent_processed_settlement<br/>fetch_expenses_after_settlement<br/>create_draft_transaction<br/>categorize_draft<br/>apply_draft]
         Reconciler[reconciler.py<br/>compute_splits_with_adjustment<br/>determine_expected_total]
         Categorizer[ExpenseCategorizer<br/>categorize_split_line<br/>categorize_all_split_lines]
     end
@@ -129,7 +129,7 @@ graph TB
     end
 
     subgraph "API Clients"
-        SplitwiseClient[SplitwiseClient<br/>get_expenses_since_last_settlement<br/>get_settlement_history<br/>calculate_current_balance]
+        SplitwiseClient[SplitwiseClient<br/>get_expenses<br/>get_settlement_history]
         YnabClient[YnabClient<br/>get_categories<br/>create_transaction]
         Classifier[CategoryClassifier<br/>classify_expense]
     end
@@ -169,124 +169,150 @@ sequenceDiagram
     participant Cat as ExpenseCategorizer
     participant Map as CategoryMapper
     participant GPT as CategoryClassifier
-    participant DB as Database
     participant UI as ui.py
 
-    Note over User,UI: DRAFT PHASE
+    Note over User,UI: SETTLEMENT SELECTION
 
-    User->>+CLI: make (run-draft)
-    CLI->>+Service: fetch_expenses_since_last_settlement()
-    Service->>+SW: get_current_user()
-    SW-->>-Service: user_id
-    Service->>+SW: get_expenses_since_last_settlement(group_id, user_id)
-    Note over SW: Auto-detects pre/post-settlement mode
-    SW-->>-Service: (expenses, mode)
-    Service-->>-CLI: expenses
+    User->>+CLI: ynab-split draft --categorize --review-all
+    CLI->>+Service: get_recent_settlements(count=3)
+    Service->>+SW: get_expenses(group_id, limit=1000)
+    SW-->>-Service: expenses[]
+    Note over Service: Filter for payment=true, sort by date
+    Service-->>-CLI: settlements[3]
+
+    alt Auto-detect (default)
+        CLI->>+Service: get_most_recent_processed_settlement(settlements)
+        Service->>+YNAB: get transactions since oldest settlement
+        YNAB-->>-Service: transactions[]
+        Note over Service: Find most recent YS- import_id
+        alt Found processed settlement
+            Service-->>CLI: settlement (auto-detected)
+            Note over CLI: Display "Using most recent processed settlement"
+        else First run - no processed settlements
+            Service-->>-CLI: None
+            Note over CLI: Display "No processed settlements found (first run?)"
+            CLI->>+UI: select_settlement_interactive(settlements)
+            UI->>User: Show settlement list with YNAB markers
+            User-->>UI: Select settlement [1-3]
+            UI-->>-CLI: selected_idx
+            Note over CLI: selected_settlement = settlements[selected_idx]
+        end
+    else Manual selection (--manually-select-settlement)
+        CLI->>+Service: check_settlements_in_ynab(settlements)
+        Service->>YNAB: Check for YS- transactions per settlement
+        Service-->>-CLI: already_in_ynab[]
+        CLI->>+UI: select_settlement_interactive(settlements, already_in_ynab)
+        UI->>User: Show settlement list with ✓ markers
+        User-->>UI: Select settlement [1-3]
+        UI-->>-CLI: selected_idx
+        Note over CLI: selected_settlement = settlements[selected_idx]
+    end
+
+    Note over User,UI: FETCH & CREATE DRAFT
+
+    CLI->>+Service: fetch_expenses_after_settlement(settlement)
+    Service->>+SW: get_expenses(group_id, dated_after=settlement.date, limit=1000)
+    Note over SW: Uses full datetime for filtering
+    SW-->>-Service: expenses[]
+    Note over Service: Filter out payment=true
+    Service-->>-CLI: regular_expenses[]
 
     CLI->>+Service: create_draft_transaction(expenses)
     Note over Service: compute_splits_with_adjustment()
     Service-->>-CLI: draft
 
     CLI->>+Service: check_if_already_processed(draft)
-    Service->>+DB: get_processed_settlement_by_hash(draft_hash)
-    DB-->>-Service: None (not processed yet)
-    Service-->>-CLI: None
+    Service->>+YNAB: Check for YS-{hash}-{date} import_id
+    YNAB-->>-Service: None
+    Service-->>-CLI: False
 
-    Note over CLI,GPT: CATEGORIZATION PHASE
+    Note over CLI,GPT: CATEGORIZATION
 
     CLI->>+Service: categorize_draft(draft)
     Service->>+YNAB: get_categories(budget_id)
     YNAB-->>-Service: categories[]
-
     Service->>+Cat: categorize_all_split_lines(draft.split_lines)
 
     loop For each split line
         Cat->>+Map: get_cached_mapping(description)
         alt Cache hit
-            Map-->>Cat: cached category
+            Map-->>-Cat: cached category
         else Cache miss
-            Map-->>Cat: None
+            Map-->>-Cat: None
             Cat->>+GPT: classify_expense(description, categories)
-            Note over GPT: Parallel API calls via ThreadPoolExecutor
+            Note over GPT: Parallel calls via ThreadPoolExecutor
             GPT-->>-Cat: (category_id, confidence, rationale)
-            Cat->>+Map: save_mapping(description, category_id, ...)
-            Map-->>Cat: ✓
+            Cat->>Map: save_mapping(description, category_id, ...)
         end
-        deactivate Map
     end
 
     Cat-->>-Service: categorized split_lines
     Service-->>-CLI: draft
 
-    Note over CLI,UI: REVIEW PHASE
+    Note over CLI,UI: REVIEW (--review-all)
 
-    loop For each split line (if --review-all)
+    loop For each split line
         CLI->>+UI: confirm_category(category_id, categories, description)
         UI->>User: Show category, ask Y/n
         alt User rejects
             UI->>UI: select_category_interactive(...)
             UI->>User: Fuzzy search prompt
             User->>UI: Select new category
-            UI-->>CLI: new_category_id
-            CLI->>+Map: save_mapping(description, new_category_id, source="manual")
-            Map-->>-CLI: ✓
+            UI-->>-CLI: new_category_id
+            CLI->>Map: save_mapping(description, new_category_id, source="manual")
         else User accepts
-            UI-->>CLI: confirmed
+            UI-->>-CLI: confirmed
         end
-        deactivate UI
     end
 
     CLI->>User: Display draft table
     deactivate CLI
 
-    Note over User,UI: APPLY PHASE (if run-apply)
+    Note over User,UI: APPLY (ynab-split apply)
 
-    User->>+CLI: make run-apply
-    Note over CLI,Service: (Repeat fetch + categorize + review)
+    User->>+CLI: ynab-split apply --categorize --review-all
+    Note over CLI,YNAB: (Repeat selection + fetch + categorize + review)
+    CLI->>User: Display draft, ask confirmation
 
     CLI->>+Service: apply_draft(draft)
-    Service->>+DB: check_if_already_processed(draft)
-    DB-->>-Service: None
-
     Service->>+YNAB: create_transaction(budget_id, draft)
-    Note over YNAB: Validates categories, creates split transaction
+    Note over YNAB: Creates split transaction with YS- import_id
     YNAB-->>-Service: transaction_id
-
-    Service->>+DB: save_processed_settlement(settlement)
-    DB-->>-Service: ✓
-
     Service-->>-CLI: transaction_id
+
     CLI->>User: ✓ Transaction created!
     deactivate CLI
 ```
 
 ### Key Components
 
-- **SettlementService**: Orchestrates workflow - fetches expenses, creates drafts, categorizes, applies to YNAB
+- **SettlementService**: Orchestrates workflow - auto-detects last processed settlement, fetches expenses after it, creates drafts, categorizes, applies to YNAB
+- **Auto-detection**: Finds most recent YS- transaction in YNAB to determine starting point; falls back to manual selection on first run
 - **ExpenseCategorizer**: Cache-first categorization with parallel GPT calls via ThreadPoolExecutor (8-10x speedup)
 - **Reconciler**: `compute_splits_with_adjustment()` ensures split line totals exactly match settlement amount (exhaustively tested against rounding errors)
 - **CategoryMapper**: SQLite-backed cache with confidence tracking - learns from manual corrections
-- **Interactive UI**: Fuzzy-searchable category picker with tab completion using prompt_toolkit
+- **Interactive UI**: Fuzzy-searchable category/settlement picker with tab completion using prompt_toolkit
 
 ### Database Schema
 
 SQLite database at `~/.ynab_split/ynab_split.db`:
 
-- **`processed_settlements`**: Tracks applied settlements for idempotency (settlement_date, draft_hash, ynab_transaction_id)
 - **`category_mappings`**: Caches expense description → category mappings (description, ynab_category_id, source, confidence)
-- **`config`**: Stores last settlement date for auto-detection
+
+Auto-detection works by querying YNAB for transactions with `YS-` prefix in import_id (no local state needed).
 
 ---
 
 ## How It Works
 
-1. **Fetch Expenses**: Auto-detects pre/post-settlement mode and fetches appropriate expenses from Splitwise
-2. **Compute Splits**: For each expense, calculates net amount: `net = paid_share - owed_share`
+1. **Select Settlement**: Auto-detects most recent processed settlement from YNAB (by finding latest YS- transaction); falls back to manual selection on first run
+2. **Fetch Expenses**: Gets ALL expenses from Splitwise after the selected settlement timestamp (no upper bound)
+3. **Compute Splits**: For each expense, calculates net amount: `net = paid_share - owed_share`
    - `net > 0`: YNAB inflow (you're owed)
    - `net < 0`: YNAB outflow (you owe)
-3. **Categorize**: Checks cache first, then calls GPT-4o-mini in parallel for uncached items
-4. **Adjust Rounding**: Ensures split totals exactly equal settlement amount (adjust last line by residual milliunits)
-5. **Apply**: Creates YNAB split transaction and stores hash for idempotency
+4. **Categorize**: Checks cache first, then calls GPT-4o-mini in parallel for uncached items
+5. **Adjust Rounding**: Ensures split totals exactly equal settlement amount (adjust last line by residual milliunits)
+6. **Apply**: Creates YNAB split transaction with deterministic `YS-{hash}-{date}` import_id for idempotency
 
 ---
 
