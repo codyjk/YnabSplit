@@ -70,37 +70,11 @@ class SettlementService:
         results = []
         with YnabClient(self.settings.ynab_access_token) as client:
             for settlement in settlements:
-                # Fetch expenses for this settlement to compute import_id
-                settlement_date = settlement.date.date()
-                # We need at least some expenses to create a draft
-                # Just check if a YS- transaction exists on this date
-                since_date = (settlement_date - timedelta(days=7)).isoformat()
-
-                try:
-                    response = client.client.get(
-                        f"/budgets/{self.settings.ynab_budget_id}/transactions",
-                        params={"since_date": since_date},
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-
-                    # Look for YS- transaction on this settlement date
-                    found = False
-                    for transaction in data.get("data", {}).get("transactions", []):
-                        tx_import_id = transaction.get("import_id")
-                        tx_date = transaction.get("date", "")
-                        if (
-                            tx_import_id
-                            and tx_import_id.startswith("YS-")
-                            and tx_date == str(settlement_date)
-                        ):
-                            found = True
-                            break
-
-                    results.append(found)
-                except Exception:
-                    # If we can't check, assume it doesn't exist
-                    results.append(False)
+                settlement_date = settlement.date.date().isoformat()
+                found = client.has_ys_transaction_on_date(
+                    self.settings.ynab_budget_id, settlement_date
+                )
+                results.append(found)
 
         return results
 
@@ -123,47 +97,29 @@ class SettlementService:
             ) - timedelta(days=7)
             since_date = oldest_settlement_date.isoformat()
 
-            try:
-                response = client.client.get(
-                    f"/budgets/{self.settings.ynab_budget_id}/transactions",
-                    params={"since_date": since_date},
-                )
-                response.raise_for_status()
-                data = response.json()
+            result = client.get_most_recent_ys_transaction(
+                self.settings.ynab_budget_id, since_date
+            )
 
-                # Find all YS- transactions
-                ys_transactions = []
-                for transaction in data.get("data", {}).get("transactions", []):
-                    tx_import_id = transaction.get("import_id")
-                    tx_date = transaction.get("date", "")
-                    if tx_import_id and tx_import_id.startswith("YS-"):
-                        ys_transactions.append((tx_date, transaction))
-
-                if not ys_transactions:
-                    logger.info("No processed settlements found in YNAB")
-                    return None
-
-                # Sort by date, most recent first
-                ys_transactions.sort(key=lambda x: x[0], reverse=True)
-                most_recent_date_str = ys_transactions[0][0]
-                most_recent_date = date.fromisoformat(most_recent_date_str)
-
-                # Find the settlement that matches this date
-                for settlement in settlements:
-                    if settlement.date.date() == most_recent_date:
-                        logger.info(
-                            f"Found most recent processed settlement: {most_recent_date}"
-                        )
-                        return settlement
-
-                logger.warning(
-                    f"Found YS- transaction on {most_recent_date} but no matching settlement"
-                )
+            if not result:
+                logger.info("No processed settlements found in YNAB")
                 return None
 
-            except Exception as e:
-                logger.error(f"Error finding most recent processed settlement: {e}")
-                return None
+            most_recent_date_str, _ = result
+            most_recent_date = date.fromisoformat(most_recent_date_str)
+
+            # Find the settlement that matches this date
+            for settlement in settlements:
+                if settlement.date.date() == most_recent_date:
+                    logger.info(
+                        f"Found most recent processed settlement: {most_recent_date}"
+                    )
+                    return settlement
+
+            logger.warning(
+                f"Found YS- transaction on {most_recent_date} but no matching settlement"
+            )
+            return None
 
     def fetch_expenses_after_settlement(
         self, settlement: SplitwiseExpense

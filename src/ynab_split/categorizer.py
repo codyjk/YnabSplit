@@ -37,6 +37,8 @@ class ExpenseCategorizer:
         self.mapper = mapper
         self.classifier = classifier
         self.categories = categories
+        # Create category lookup dictionary for O(1) access
+        self._category_lookup = {cat.id: cat for cat in categories}
 
     def categorize_split_line(
         self, split_line: ProposedSplitLine
@@ -158,12 +160,11 @@ class ExpenseCategorizer:
         self, split_line: ProposedSplitLine, category_id: str, confidence: float | None
     ) -> None:
         """Apply categorization results to a split line."""
-        # Find category name
-        category_name = None
-        for cat in self.categories:
-            if cat.id == category_id:
-                category_name = f"{cat.category_group_name} > {cat.name}"
-                break
+        # Look up category name using O(1) dictionary lookup
+        category = self._category_lookup.get(category_id)
+        category_name = (
+            f"{category.category_group_name} > {category.name}" if category else None
+        )
 
         # Update split line
         split_line.category_id = category_id

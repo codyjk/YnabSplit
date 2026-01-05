@@ -2,7 +2,7 @@
 
 import hashlib
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import cast
 
 import httpx
@@ -291,6 +291,100 @@ class YnabClient:
             logger.error(f"HTTP error updating import_id: {e}")
             return False
 
+    def get_transactions_since(
+        self, budget_id: str, since_date: str
+    ) -> list[dict[str, object]]:
+        """
+        Get all transactions since a given date.
+
+        Args:
+            budget_id: The YNAB budget ID
+            since_date: ISO date string (YYYY-MM-DD)
+
+        Returns:
+            List of transaction dictionaries
+        """
+        try:
+            response = self.client.get(
+                f"/budgets/{budget_id}/transactions",
+                params={"since_date": since_date},
+            )
+            response.raise_for_status()
+            data = response.json()
+            transactions: list[dict[str, object]] = data.get("data", {}).get(
+                "transactions", []
+            )
+            return transactions
+
+        except httpx.HTTPError as e:
+            logger.warning(f"Error fetching transactions since {since_date}: {e}")
+            return []
+
+    def has_ys_transaction_on_date(self, budget_id: str, transaction_date: str) -> bool:
+        """
+        Check if a YS- transaction exists on a specific date.
+
+        Args:
+            budget_id: The YNAB budget ID
+            transaction_date: ISO date string (YYYY-MM-DD)
+
+        Returns:
+            True if a YS- transaction exists on this date
+        """
+        # Search ±7 days around the target date
+        target_date = date.fromisoformat(transaction_date)
+        since_date = (target_date - timedelta(days=7)).isoformat()
+
+        transactions = self.get_transactions_since(budget_id, since_date)
+
+        for transaction in transactions:
+            tx_import_id = transaction.get("import_id")
+            tx_date = transaction.get("date")
+            if (
+                tx_import_id
+                and isinstance(tx_import_id, str)
+                and tx_import_id.startswith("YS-")
+                and tx_date == transaction_date
+            ):
+                return True
+
+        return False
+
+    def get_most_recent_ys_transaction(
+        self, budget_id: str, since_date: str
+    ) -> tuple[str, dict[str, object]] | None:
+        """
+        Get the most recent YS- transaction.
+
+        Args:
+            budget_id: The YNAB budget ID
+            since_date: ISO date string to start search from
+
+        Returns:
+            Tuple of (transaction_date, transaction_dict) or None if not found
+        """
+        transactions = self.get_transactions_since(budget_id, since_date)
+
+        # Find all YS- transactions
+        ys_transactions = []
+        for transaction in transactions:
+            tx_import_id = transaction.get("import_id")
+            tx_date = transaction.get("date")
+            if (
+                tx_import_id
+                and isinstance(tx_import_id, str)
+                and tx_import_id.startswith("YS-")
+            ):
+                if isinstance(tx_date, str):
+                    ys_transactions.append((tx_date, transaction))
+
+        if not ys_transactions:
+            return None
+
+        # Sort by date, most recent first
+        ys_transactions.sort(key=lambda x: x[0], reverse=True)
+        return ys_transactions[0]
+
     def transaction_exists(
         self, budget_id: str, draft: ClearingTransactionDraft
     ) -> bool:
@@ -310,39 +404,30 @@ class YnabClient:
         # Fetch transactions from YNAB around the settlement date
         # Check ±7 days to account for timing differences
         since_date = (draft.settlement_date - timedelta(days=7)).isoformat()
+        transactions = self.get_transactions_since(budget_id, since_date)
 
-        try:
-            response = self.client.get(
-                f"/budgets/{budget_id}/transactions",
-                params={"since_date": since_date},
-            )
-            response.raise_for_status()
-            data = response.json()
+        logger.info(
+            f"Checking YNAB for import_id: {import_id} "
+            f"(found {len(transactions)} transactions since {since_date})"
+        )
 
-            transactions = data.get("data", {}).get("transactions", [])
-            logger.info(
-                f"Checking YNAB for import_id: {import_id} "
-                f"(found {len(transactions)} transactions since {since_date})"
-            )
+        # Check if any transaction has this import_id
+        for transaction in transactions:
+            tx_import_id = transaction.get("import_id")
+            if tx_import_id == import_id:
+                logger.info(
+                    f"Found existing transaction in YNAB with import_id: {import_id}"
+                )
+                return True
+            elif (
+                tx_import_id
+                and isinstance(tx_import_id, str)
+                and tx_import_id.startswith("YS-")
+            ):
+                logger.debug(
+                    f"Found YS transaction but different ID: {tx_import_id} "
+                    f"(date: {transaction.get('date')})"
+                )
 
-            # Check if any transaction has this import_id
-            for transaction in transactions:
-                tx_import_id = transaction.get("import_id")
-                if tx_import_id == import_id:
-                    logger.info(
-                        f"Found existing transaction in YNAB with import_id: {import_id}"
-                    )
-                    return True
-                elif tx_import_id and tx_import_id.startswith("YS-"):
-                    logger.debug(
-                        f"Found YS transaction but different ID: {tx_import_id} "
-                        f"(date: {transaction.get('date')})"
-                    )
-
-            logger.info(f"No matching transaction found for import_id: {import_id}")
-            return False
-
-        except httpx.HTTPError as e:
-            logger.warning(f"Error checking YNAB for existing transaction: {e}")
-            # If we can't check YNAB, assume it doesn't exist (fail open)
-            return False
+        logger.info(f"No matching transaction found for import_id: {import_id}")
+        return False

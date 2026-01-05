@@ -35,6 +35,14 @@ class Database:
         """
         )
 
+        # Index on settlement_date for date-based queries
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_settlement_date
+            ON processed_settlements(settlement_date)
+        """
+        )
+
         # Category mappings table
         cursor.execute(
             """
