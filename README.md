@@ -258,11 +258,12 @@ sequenceDiagram
             UI->>UI: select_category_interactive(...)
             UI->>User: Fuzzy search prompt
             User->>UI: Select new category
-            UI-->>-CLI: new_category_id
+            UI-->>CLI: new_category_id
             CLI->>Map: save_mapping(description, new_category_id, source="manual")
         else User accepts
-            UI-->>-CLI: confirmed
+            UI-->>CLI: confirmed
         end
+        UI->>-CLI: (return)
     end
 
     CLI->>User: Display draft table
