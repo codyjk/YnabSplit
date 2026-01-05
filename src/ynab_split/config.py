@@ -27,9 +27,11 @@ class Settings(BaseSettings):
     # OpenAI API
     openai_api_key: str
 
-    # Settings
-    clearing_payee_name: str = "Venmo"
-    gpt_confidence_threshold: float = 0.7
+    # Transaction settings
+    clearing_payee_name: str = "Venmo"  # Payee name for clearing transactions
+
+    # Categorization settings
+    gpt_confidence_threshold: float = 0.9  # Flag for review if confidence < threshold
 
     # Database path
     database_path: Path = Path.home() / ".ynab_split" / "ynab_split.db"

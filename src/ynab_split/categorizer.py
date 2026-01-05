@@ -25,6 +25,7 @@ class ExpenseCategorizer:
         mapper: CategoryMapper,
         classifier: CategoryClassifier,
         categories: list[YnabCategory],
+        confidence_threshold: float = 0.9,
     ):
         """
         Initialize the categorizer.
@@ -33,10 +34,12 @@ class ExpenseCategorizer:
             mapper: Category mapper for cache operations
             classifier: GPT classifier for new classifications
             categories: Available YNAB categories
+            confidence_threshold: Minimum confidence to avoid review flag
         """
         self.mapper = mapper
         self.classifier = classifier
         self.categories = categories
+        self.confidence_threshold = confidence_threshold
         # Create category lookup dictionary for O(1) access
         self._category_lookup = {cat.id: cat for cat in categories}
 
@@ -171,6 +174,6 @@ class ExpenseCategorizer:
         split_line.category_name = category_name
         split_line.confidence = confidence
 
-        # Flag for review if confidence is low
-        if confidence is not None and confidence < 0.9:
+        # Flag for review if confidence is below threshold
+        if confidence is not None and confidence < self.confidence_threshold:
             split_line.needs_review = True

@@ -294,7 +294,10 @@ class SettlementService:
             api_key=self.settings.openai_api_key, model="gpt-4o-mini"
         )
         categorizer = ExpenseCategorizer(
-            mapper=mapper, classifier=classifier, categories=categories
+            mapper=mapper,
+            classifier=classifier,
+            categories=categories,
+            confidence_threshold=self.settings.gpt_confidence_threshold,
         )
 
         # Categorize all split lines
