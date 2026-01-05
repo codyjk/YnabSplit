@@ -234,11 +234,11 @@ sequenceDiagram
     Service->>+Cat: categorize_all_split_lines(draft.split_lines)
 
     loop For each split line
-        Cat->>+Map: get_cached_mapping(description)
+        Cat->>Map: get_cached_mapping(description)
         alt Cache hit
-            Map-->>-Cat: cached category
+            Map-->>Cat: cached category
         else Cache miss
-            Map-->>-Cat: None
+            Map-->>Cat: None
             Cat->>+GPT: classify_expense(description, categories)
             Note over GPT: Parallel calls via ThreadPoolExecutor
             GPT-->>-Cat: (category_id, confidence, rationale)
