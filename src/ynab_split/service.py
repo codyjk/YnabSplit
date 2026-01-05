@@ -14,6 +14,7 @@ from .clients.splitwise import SplitwiseClient
 from .clients.ynab import YnabClient
 from .config import Settings
 from .db import Database
+from .exceptions import SettlementAlreadyProcessedError
 from .mapper import CategoryMapper
 from .models import (
     ClearingTransactionDraft,
@@ -259,7 +260,7 @@ class SettlementService:
 
         return draft
 
-    def check_if_already_processed(self, draft: ClearingTransactionDraft) -> bool:
+    def check_if_already_processed(self, draft: ClearingTransactionDraft) -> None:
         """
         Check if a draft has already been processed (idempotency check).
 
@@ -268,8 +269,8 @@ class SettlementService:
         Args:
             draft: The draft transaction to check
 
-        Returns:
-            True if already processed, False otherwise
+        Raises:
+            SettlementAlreadyProcessedError: If the settlement has already been processed
         """
         # Check YNAB directly for existing transaction
         with YnabClient(self.settings.ynab_access_token) as client:
@@ -281,8 +282,7 @@ class SettlementService:
                 logger.info(
                     f"Draft already exists in YNAB for settlement on {draft.settlement_date}"
                 )
-
-            return exists
+                raise SettlementAlreadyProcessedError(str(draft.settlement_date))
 
     def get_ynab_categories(self) -> list[YnabCategory]:
         """
@@ -364,14 +364,7 @@ class SettlementService:
             YNAB transaction ID
         """
         # Check if already processed (idempotency)
-        already_exists = self.check_if_already_processed(draft)
-        if already_exists:
-            logger.warning(
-                f"Draft already exists in YNAB (settlement date: {draft.settlement_date})"
-            )
-            raise ValueError(
-                f"This settlement already exists in YNAB (settlement date: {draft.settlement_date})"
-            )
+        self.check_if_already_processed(draft)
 
         # Create transaction in YNAB
         with YnabClient(self.settings.ynab_access_token) as client:

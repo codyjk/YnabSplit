@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -117,7 +117,7 @@ class CategoryMapping(BaseModel):
     id: int | None = None
     pattern: str  # normalized description
     ynab_category_id: str
-    source: str  # 'gpt', 'manual', 'rule'
+    source: Literal["gpt", "manual", "rule"]
     confidence: float | None = None
     rationale: str | None = None
     created_at: datetime = Field(default_factory=datetime.now)

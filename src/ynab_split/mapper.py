@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime
+from typing import Literal
 
 from .db import Database
 from .models import CategoryMapping
@@ -53,7 +54,7 @@ class CategoryMapper:
         self,
         description: str,
         category_id: str,
-        source: str,
+        source: Literal["gpt", "manual", "rule"],
         confidence: float | None = None,
         rationale: str | None = None,
     ) -> CategoryMapping:
