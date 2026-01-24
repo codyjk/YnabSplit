@@ -158,7 +158,7 @@ class YnabClient:
             "amount": draft.total_amount_milliunits,
             "payee_name": draft.payee_name,
             "memo": f"Splitwise settlement (draft: {draft.draft_id})",
-            "cleared": "cleared",
+            "cleared": "uncleared",  # Leave uncleared so YNAB can auto-match
             "approved": True,
             "import_id": import_id,
             "subtransactions": subtransactions,
