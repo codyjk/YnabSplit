@@ -2,13 +2,11 @@
 
 import logging
 import sys
-from datetime import timedelta
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from .clients.ynab import YnabClient
 from .config import load_settings
 from .db import Database
 from .exceptions import SettlementAlreadyProcessedError
@@ -55,10 +53,10 @@ def _select_settlement(
     selected_settlement: SplitwiseExpense
     if manually_select:
         # User explicitly requested manual selection
-        console.print("[dim]Checking which settlements are already in YNAB...[/dim]")
-        already_in_ynab = service.check_settlements_in_ynab(settlements)
+        console.print("[dim]Checking which settlements have been processed...[/dim]")
+        already_processed = service.check_settlements_processed(settlements)
 
-        selected_idx = select_settlement_interactive(settlements, already_in_ynab)
+        selected_idx = select_settlement_interactive(settlements, already_processed)
         if selected_idx is None:
             console.print("[yellow]No settlement selected.[/yellow]")
             return None
@@ -72,15 +70,15 @@ def _select_settlement(
         if auto_detected is None:
             # First run - no processed settlements found
             console.print(
-                "[yellow]No processed settlements found in YNAB (first run?).[/yellow]"
+                "[yellow]No processed settlements found (first run?).[/yellow]"
             )
             console.print(
                 "[dim]Please select the last settlement you logged in YNAB.[/dim]\n"
             )
 
             # Fall back to manual selection
-            already_in_ynab = service.check_settlements_in_ynab(settlements)
-            selected_idx = select_settlement_interactive(settlements, already_in_ynab)
+            already_processed = service.check_settlements_processed(settlements)
+            selected_idx = select_settlement_interactive(settlements, already_processed)
             if selected_idx is None:
                 console.print("[yellow]No settlement selected.[/yellow]")
                 return None
@@ -124,7 +122,7 @@ def draft(
     manually_select_settlement: bool = typer.Option(
         False,
         "--manually-select-settlement",
-        help="Manually select settlement (otherwise auto-detects from YNAB)",
+        help="Manually select settlement (otherwise auto-detects from local DB)",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
@@ -359,7 +357,7 @@ def apply(
     manually_select_settlement: bool = typer.Option(
         False,
         "--manually-select-settlement",
-        help="Manually select settlement (otherwise auto-detects from YNAB)",
+        help="Manually select settlement (otherwise auto-detects from local DB)",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -477,162 +475,6 @@ def apply(
         # Already processed or validation error
         console.print(f"\n[bold yellow]⚠️  {e}[/bold yellow]\n")
         sys.exit(1)
-    except SettlementAlreadyProcessedError as e:
-        console.print(f"\n[yellow]⚠️  {e}[/yellow]\n")
-        sys.exit(0)
-    except Exception as e:
-        console.print(f"\n[bold red]Error:[/bold red] {e}")
-        if verbose:
-            raise
-        sys.exit(1)
-    finally:
-        if "db" in locals():
-            db.close()
-
-
-@app.command()
-def fix_import_id(
-    manually_select_settlement: bool = typer.Option(
-        True,  # Default to True for fix_import_id since it's a maintenance command
-        "--manually-select-settlement",
-        help="Manually select settlement (otherwise auto-detects from YNAB)",
-    ),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-):
-    """
-    Fix the import_id for an existing YNAB transaction.
-
-    This command updates the import_id of the most recent settlement transaction
-    in YNAB to match the new deterministic format. Use this after upgrading to
-    the deterministic import_id system.
-    """
-    setup_logging(verbose)
-
-    try:
-        # Load configuration
-        settings = load_settings()
-        db = Database(settings.database_path)
-
-        # Create service
-        service = SettlementService(settings, db)
-
-        # Select settlement (auto-detect or manual)
-        selected_settlement = _select_settlement(service, manually_select_settlement)
-        if selected_settlement is None:
-            return
-
-        # Fetch ALL expenses AFTER selected settlement (no upper bound)
-        console.print(
-            f"\n[bold blue]Fetching all expenses after {selected_settlement.date.date()}...[/bold blue]"
-        )
-        expenses = service.fetch_expenses_after_settlement(selected_settlement)
-
-        if not expenses:
-            console.print("[yellow]No expenses found AFTER this settlement.[/yellow]")
-            return
-
-        console.print(f"[green]Found {len(expenses)} expenses[/green]\n")
-
-        # Create draft to compute the correct import_id
-        console.print("[bold blue]Computing deterministic import_id...[/bold blue]")
-        draft = service.create_draft_transaction(expenses)
-
-        with YnabClient(settings.ynab_access_token) as client:
-            # Generate the new (deterministic) import_id
-            new_import_id = client._generate_import_id(draft)
-
-            # Search for transaction with old import_id (YS- prefix, same date)
-            since_date = (draft.settlement_date - timedelta(days=7)).isoformat()
-
-            console.print(
-                f"\n[bold blue]Searching for existing YS transaction on "
-                f"{draft.settlement_date}...[/bold blue]"
-            )
-
-            response = client.client.get(
-                f"/budgets/{settings.ynab_budget_id}/transactions",
-                params={"since_date": since_date},
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            # Find YS transactions on the settlement date
-            ys_transactions = []
-            for transaction in data.get("data", {}).get("transactions", []):
-                tx_import_id = transaction.get("import_id")
-                tx_date = transaction.get("date", "")
-                if (
-                    tx_import_id
-                    and tx_import_id.startswith("YS-")
-                    and tx_date == str(draft.settlement_date)
-                ):
-                    ys_transactions.append(transaction)
-
-            if not ys_transactions:
-                console.print(
-                    f"\n[yellow]No YS transaction found on {draft.settlement_date}[/yellow]"
-                )
-                console.print(
-                    "[dim]Maybe the transaction was already updated or doesn't exist?[/dim]"
-                )
-                return
-
-            if len(ys_transactions) > 1:
-                console.print(
-                    f"\n[yellow]Found {len(ys_transactions)} YS transactions "
-                    f"on {draft.settlement_date}[/yellow]"
-                )
-                console.print("[yellow]Please specify which one to update.[/yellow]")
-                return
-
-            # Found exactly one transaction
-            transaction = ys_transactions[0]
-            old_import_id = transaction.get("import_id", "")
-            transaction_id = transaction["id"]
-
-            console.print("\n[bold]Found transaction:[/bold]")
-            console.print(f"  Transaction ID: {transaction_id}")
-            console.print(f"  Date: {transaction['date']}")
-            console.print(f"  Payee: {transaction.get('payee_name', 'N/A')}")
-            console.print(
-                f"  Amount: {format_money(transaction['amount'] / 1000, use_color=False)}"
-            )
-            console.print(f"  Old import_id: [red]{old_import_id}[/red]")
-            console.print(f"  New import_id: [green]{new_import_id}[/green]")
-
-            if old_import_id == new_import_id:
-                console.print(
-                    "\n[green]✓ Import ID is already correct! No update needed.[/green]"
-                )
-                return
-
-            # Confirm update
-            console.print(
-                "\n[bold yellow]⚠️  Ready to update this transaction's import_id[/bold yellow]"
-            )
-            confirm = input("Continue? [y/N] ").strip().lower()
-            if confirm not in ("y", "yes"):
-                console.print("[yellow]Cancelled.[/yellow]")
-                return
-
-            # Update the import_id
-            console.print("\n[bold blue]Updating import_id...[/bold blue]")
-            success = client.update_transaction_import_id(
-                settings.ynab_budget_id, transaction_id, new_import_id
-            )
-
-            if success:
-                console.print(
-                    "\n[bold green]✓ Import ID updated successfully![/bold green]"
-                )
-                console.print(
-                    "\nYou can now run [cyan]ynab-split draft[/cyan] to verify "
-                    "it detects the existing settlement."
-                )
-            else:
-                console.print("\n[bold red]✗ Failed to update import_id[/bold red]")
-                console.print("Check the error messages above for details.")
-
     except SettlementAlreadyProcessedError as e:
         console.print(f"\n[yellow]⚠️  {e}[/yellow]\n")
         sys.exit(0)

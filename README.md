@@ -119,7 +119,7 @@ graph TB
 
     subgraph "Data Layer"
         Mapper[CategoryMapper<br/>get_cached_mapping<br/>save_mapping]
-        DB[Database<br/>get_processed_settlement_by_hash<br/>save_processed_settlement]
+        DB[Database<br/>has_settlement_on_date<br/>get_most_recent_settlement_date<br/>save_processed_settlement]
     end
 
     subgraph "External APIs"
@@ -164,6 +164,7 @@ sequenceDiagram
     actor User
     participant CLI as cli.py<br/>draft/apply
     participant Service as SettlementService
+    participant DB as Database<br/>(SQLite)
     participant SW as SplitwiseClient
     participant YNAB as YnabClient
     participant Cat as ExpenseCategorizer
@@ -182,26 +183,30 @@ sequenceDiagram
 
     alt Auto-detect (default)
         CLI->>+Service: get_most_recent_processed_settlement(settlements)
-        Service->>+YNAB: get transactions since oldest settlement
-        YNAB-->>-Service: transactions[]
-        Note over Service: Find most recent YS- import_id
+        Service->>+DB: get_most_recent_settlement_date()
+        DB-->>-Service: date | None
         alt Found processed settlement
             Service-->>CLI: settlement (auto-detected)
             Note over CLI: Display "Using most recent processed settlement"
         else First run - no processed settlements
             Service-->>-CLI: None
             Note over CLI: Display "No processed settlements found (first run?)"
-            CLI->>+UI: select_settlement_interactive(settlements)
-            UI->>User: Show settlement list with YNAB markers
+            CLI->>+Service: check_settlements_processed(settlements)
+            Service->>+DB: has_settlement_on_date() per settlement
+            DB-->>-Service: bool[]
+            Service-->>-CLI: already_processed[]
+            CLI->>+UI: select_settlement_interactive(settlements, already_processed)
+            UI->>User: Show settlement list with ✓ markers
             User-->>UI: Select settlement [1-3]
             UI-->>-CLI: selected_idx
             Note over CLI: selected_settlement = settlements[selected_idx]
         end
     else Manual selection (--manually-select-settlement)
-        CLI->>+Service: check_settlements_in_ynab(settlements)
-        Service->>YNAB: Check for YS- transactions per settlement
-        Service-->>-CLI: already_in_ynab[]
-        CLI->>+UI: select_settlement_interactive(settlements, already_in_ynab)
+        CLI->>+Service: check_settlements_processed(settlements)
+        Service->>+DB: has_settlement_on_date() per settlement
+        DB-->>-Service: bool[]
+        Service-->>-CLI: already_processed[]
+        CLI->>+UI: select_settlement_interactive(settlements, already_processed)
         UI->>User: Show settlement list with ✓ markers
         User-->>UI: Select settlement [1-3]
         UI-->>-CLI: selected_idx
@@ -222,9 +227,9 @@ sequenceDiagram
     Service-->>-CLI: draft
 
     CLI->>+Service: check_if_already_processed(draft)
-    Service->>+YNAB: Check for YS-{hash}-{date} import_id
-    YNAB-->>-Service: None
-    Service-->>-CLI: False
+    Service->>+DB: is_settlement_processed(draft_hash)
+    DB-->>-Service: False
+    Service-->>-CLI: (no exception)
 
     Note over CLI,GPT: CATEGORIZATION
 
@@ -277,7 +282,7 @@ sequenceDiagram
 
     CLI->>+Service: apply_draft(draft)
     Service->>+YNAB: create_transaction(budget_id, draft)
-    Note over YNAB: Creates split transaction with YS- import_id
+    Note over YNAB: Creates split transaction (no import_id)
     YNAB-->>-Service: transaction_id
     Service-->>-CLI: transaction_id
 
@@ -288,7 +293,7 @@ sequenceDiagram
 ### Key Components
 
 - **SettlementService**: Orchestrates workflow - auto-detects last processed settlement, fetches expenses after it, creates drafts, categorizes, applies to YNAB
-- **Auto-detection**: Finds most recent YS- transaction in YNAB to determine starting point; falls back to manual selection on first run
+- **Auto-detection**: Queries local DB for most recent processed settlement to determine starting point; falls back to manual selection on first run
 - **ExpenseCategorizer**: Cache-first categorization with parallel GPT calls via ThreadPoolExecutor (8-10x speedup)
 - **Reconciler**: `compute_splits_with_adjustment()` ensures split line totals exactly match settlement amount (exhaustively tested against rounding errors)
 - **CategoryMapper**: SQLite-backed cache with confidence tracking - learns from manual corrections
@@ -298,22 +303,23 @@ sequenceDiagram
 
 SQLite database at `~/.ynab_split/ynab_split.db`:
 
+- **`processed_settlements`**: Tracks processed settlements (settlement_date, draft_hash, ynab_transaction_id) for auto-detection and idempotency
 - **`category_mappings`**: Caches expense description → category mappings (description, ynab_category_id, source, confidence)
 
-Auto-detection works by querying YNAB for transactions with `YS-` prefix in import_id (no local state needed).
+Auto-detection works by querying the local `processed_settlements` table for previously processed settlement dates.
 
 ---
 
 ## How It Works
 
-1. **Select Settlement**: Auto-detects most recent processed settlement from YNAB (by finding latest YS- transaction); falls back to manual selection on first run
+1. **Select Settlement**: Auto-detects most recent processed settlement from local DB; falls back to manual selection on first run
 2. **Fetch Expenses**: Gets ALL expenses from Splitwise after the selected settlement timestamp (no upper bound)
 3. **Compute Splits**: For each expense, calculates net amount: `net = paid_share - owed_share`
    - `net > 0`: YNAB inflow (you're owed)
    - `net < 0`: YNAB outflow (you owe)
 4. **Categorize**: Checks cache first, then calls GPT-4o-mini in parallel for uncached items
 5. **Adjust Rounding**: Ensures split totals exactly equal settlement amount (adjust last line by residual milliunits)
-6. **Apply**: Creates YNAB split transaction with deterministic `YS-{hash}-{date}` import_id for idempotency
+6. **Apply**: Creates YNAB split transaction (no import_id, enabling bank auto-match); uses local `draft_hash` for idempotency
 
 ---
 

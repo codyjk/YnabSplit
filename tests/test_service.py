@@ -16,7 +16,10 @@ from ynab_split.models import (
     SplitwiseExpense,
     SplitwiseUserShare,
 )
-from ynab_split.service import SettlementService, compute_draft_hash_from_draft
+from ynab_split.service import (
+    SettlementService,
+    compute_draft_hash_from_draft,
+)
 
 
 @pytest.fixture
@@ -324,3 +327,184 @@ class TestFetchExpensesAfterSettlement:
         # Should only return non-payment expenses
         assert len(result) == 2
         assert all(not exp.payment for exp in result)
+
+
+class TestCheckSettlementsProcessed:
+    """Tests for check_settlements_processed method."""
+
+    def test_returns_true_for_processed_settlement(self, service, mock_db):
+        """Should return True for settlements with matching date in DB."""
+        # Insert a processed settlement for 2024-01-20
+        mock_db.save_processed_settlement(
+            ProcessedSettlement(
+                settlement_date=date(2024, 1, 20),
+                splitwise_group_id=123,
+                draft_hash="abc123",
+                ynab_transaction_id="tx-1",
+            )
+        )
+
+        settlements = [
+            SplitwiseExpense(
+                id=100,
+                group_id=123,
+                description="Settlement",
+                date=datetime(2024, 1, 20, 12, 0, 0, tzinfo=UTC),
+                cost=Decimal("10.00"),
+                currency_code="USD",
+                payment=True,
+                users=[],
+            ),
+        ]
+
+        result = service.check_settlements_processed(settlements)
+
+        assert result == [True]
+
+    def test_returns_false_for_unprocessed_settlement(self, service):
+        """Should return False for settlements not in DB."""
+        settlements = [
+            SplitwiseExpense(
+                id=100,
+                group_id=123,
+                description="Settlement",
+                date=datetime(2024, 1, 20, 12, 0, 0, tzinfo=UTC),
+                cost=Decimal("10.00"),
+                currency_code="USD",
+                payment=True,
+                users=[],
+            ),
+        ]
+
+        result = service.check_settlements_processed(settlements)
+
+        assert result == [False]
+
+    def test_returns_mixed_results(self, service, mock_db):
+        """Should return correct booleans for mix of processed/unprocessed."""
+        mock_db.save_processed_settlement(
+            ProcessedSettlement(
+                settlement_date=date(2024, 1, 20),
+                splitwise_group_id=123,
+                draft_hash="abc123",
+                ynab_transaction_id="tx-1",
+            )
+        )
+
+        settlements = [
+            SplitwiseExpense(
+                id=101,
+                group_id=123,
+                description="Settlement",
+                date=datetime(2024, 1, 25, 12, 0, 0, tzinfo=UTC),
+                cost=Decimal("15.00"),
+                currency_code="USD",
+                payment=True,
+                users=[],
+            ),
+            SplitwiseExpense(
+                id=100,
+                group_id=123,
+                description="Settlement",
+                date=datetime(2024, 1, 20, 12, 0, 0, tzinfo=UTC),
+                cost=Decimal("10.00"),
+                currency_code="USD",
+                payment=True,
+                users=[],
+            ),
+        ]
+
+        result = service.check_settlements_processed(settlements)
+
+        assert result == [False, True]
+
+
+class TestGetMostRecentProcessedSettlement:
+    """Tests for get_most_recent_processed_settlement method."""
+
+    def test_returns_matching_settlement(self, service, mock_db):
+        """Should return the settlement matching the most recent DB date."""
+        mock_db.save_processed_settlement(
+            ProcessedSettlement(
+                settlement_date=date(2024, 1, 20),
+                splitwise_group_id=123,
+                draft_hash="abc123",
+                ynab_transaction_id="tx-1",
+            )
+        )
+
+        settlements = [
+            SplitwiseExpense(
+                id=101,
+                group_id=123,
+                description="Settlement",
+                date=datetime(2024, 1, 25, 12, 0, 0, tzinfo=UTC),
+                cost=Decimal("15.00"),
+                currency_code="USD",
+                payment=True,
+                users=[],
+            ),
+            SplitwiseExpense(
+                id=100,
+                group_id=123,
+                description="Settlement",
+                date=datetime(2024, 1, 20, 12, 0, 0, tzinfo=UTC),
+                cost=Decimal("10.00"),
+                currency_code="USD",
+                payment=True,
+                users=[],
+            ),
+        ]
+
+        result = service.get_most_recent_processed_settlement(settlements)
+
+        assert result is not None
+        assert result.id == 100
+        assert result.date.date() == date(2024, 1, 20)
+
+    def test_returns_none_for_empty_db(self, service):
+        """Should return None when no settlements in DB."""
+        settlements = [
+            SplitwiseExpense(
+                id=100,
+                group_id=123,
+                description="Settlement",
+                date=datetime(2024, 1, 20, 12, 0, 0, tzinfo=UTC),
+                cost=Decimal("10.00"),
+                currency_code="USD",
+                payment=True,
+                users=[],
+            ),
+        ]
+
+        result = service.get_most_recent_processed_settlement(settlements)
+
+        assert result is None
+
+    def test_returns_none_when_no_matching_settlement(self, service, mock_db):
+        """Should return None when DB date doesn't match any settlement."""
+        mock_db.save_processed_settlement(
+            ProcessedSettlement(
+                settlement_date=date(2024, 1, 10),
+                splitwise_group_id=123,
+                draft_hash="abc123",
+                ynab_transaction_id="tx-1",
+            )
+        )
+
+        settlements = [
+            SplitwiseExpense(
+                id=100,
+                group_id=123,
+                description="Settlement",
+                date=datetime(2024, 1, 20, 12, 0, 0, tzinfo=UTC),
+                cost=Decimal("10.00"),
+                currency_code="USD",
+                payment=True,
+                users=[],
+            ),
+        ]
+
+        result = service.get_most_recent_processed_settlement(settlements)
+
+        assert result is None

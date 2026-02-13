@@ -174,6 +174,25 @@ class Database:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
+    def has_settlement_on_date(self, settlement_date: date) -> bool:
+        """Check if any settlement has been processed on the given date."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM processed_settlements WHERE settlement_date = ? LIMIT 1",
+            (settlement_date.isoformat(),),
+        )
+        return cursor.fetchone() is not None
+
+    def get_most_recent_settlement_date(self) -> date | None:
+        """Get the most recent processed settlement date."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT settlement_date FROM processed_settlements "
+            "ORDER BY settlement_date DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        return date.fromisoformat(row["settlement_date"]) if row else None
+
     # ========================================================================
     # Category mappings operations
     # ========================================================================

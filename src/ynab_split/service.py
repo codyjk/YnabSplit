@@ -6,7 +6,7 @@ and reconciliation logic in a functional, immutable way.
 
 import hashlib
 import logging
-from datetime import date, timedelta
+from datetime import date
 
 from .categorizer import ExpenseCategorizer
 from .clients.openai_client import CategoryClassifier
@@ -55,34 +55,25 @@ class SettlementService:
             logger.info(f"Fetched {len(settlements)} recent settlements")
             return settlements
 
-    def check_settlements_in_ynab(
+    def check_settlements_processed(
         self, settlements: list[SplitwiseExpense]
     ) -> list[bool]:
         """
-        Check which settlements already exist in YNAB.
+        Check which settlements have already been processed (exist in local DB).
 
         Args:
             settlements: List of settlements to check
 
         Returns:
-            List of booleans, True if settlement exists in YNAB
+            List of booleans, True if settlement has been processed
         """
-        results = []
-        with YnabClient(self.settings.ynab_access_token) as client:
-            for settlement in settlements:
-                settlement_date = settlement.date.date().isoformat()
-                found = client.has_ys_transaction_on_date(
-                    self.settings.ynab_budget_id, settlement_date
-                )
-                results.append(found)
-
-        return results
+        return [self.db.has_settlement_on_date(s.date.date()) for s in settlements]
 
     def get_most_recent_processed_settlement(
         self, settlements: list[SplitwiseExpense]
     ) -> SplitwiseExpense | None:
         """
-        Find the most recent settlement that has been processed (exists in YNAB).
+        Find the most recent settlement that has been processed (exists in local DB).
 
         Args:
             settlements: List of settlements to check (sorted newest first)
@@ -90,36 +81,25 @@ class SettlementService:
         Returns:
             The most recent processed settlement, or None if none found
         """
-        with YnabClient(self.settings.ynab_access_token) as client:
-            # Look for any YS- transactions in recent history
-            oldest_settlement_date = min(
-                s.date.date() for s in settlements
-            ) - timedelta(days=7)
-            since_date = oldest_settlement_date.isoformat()
+        most_recent_date = self.db.get_most_recent_settlement_date()
 
-            result = client.get_most_recent_ys_transaction(
-                self.settings.ynab_budget_id, since_date
-            )
-
-            if not result:
-                logger.info("No processed settlements found in YNAB")
-                return None
-
-            most_recent_date_str, _ = result
-            most_recent_date = date.fromisoformat(most_recent_date_str)
-
-            # Find the settlement that matches this date
-            for settlement in settlements:
-                if settlement.date.date() == most_recent_date:
-                    logger.info(
-                        f"Found most recent processed settlement: {most_recent_date}"
-                    )
-                    return settlement
-
-            logger.warning(
-                f"Found YS- transaction on {most_recent_date} but no matching settlement"
-            )
+        if not most_recent_date:
+            logger.info("No processed settlements found in local DB")
             return None
+
+        # Find the settlement that matches this date
+        for settlement in settlements:
+            if settlement.date.date() == most_recent_date:
+                logger.info(
+                    f"Found most recent processed settlement: {most_recent_date}"
+                )
+                return settlement
+
+        logger.warning(
+            f"Found processed settlement on {most_recent_date} "
+            f"but no matching settlement in Splitwise"
+        )
+        return None
 
     def fetch_expenses_after_settlement(
         self, settlement: SplitwiseExpense
