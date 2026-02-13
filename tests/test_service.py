@@ -11,11 +11,12 @@ from ynab_split.db import Database
 from ynab_split.exceptions import SettlementAlreadyProcessedError
 from ynab_split.models import (
     ClearingTransactionDraft,
+    ProcessedSettlement,
     ProposedSplitLine,
     SplitwiseExpense,
     SplitwiseUserShare,
 )
-from ynab_split.service import SettlementService
+from ynab_split.service import SettlementService, compute_draft_hash_from_draft
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ def mock_settings():
 def mock_db(tmp_path):
     """Create a temporary database."""
     db_path = tmp_path / "test.db"
-    db = Database(str(db_path))
+    db = Database(db_path)
     yield db
     db.close()
 
@@ -172,11 +173,8 @@ class TestGetRecentSettlements:
 class TestCheckIfAlreadyProcessed:
     """Tests for check_if_already_processed method."""
 
-    @patch("ynab_split.service.YnabClient")
-    def test_raises_exception_when_already_processed(
-        self, mock_client_class, service, sample_expenses
-    ):
-        """Should raise SettlementAlreadyProcessedError if already exists."""
+    def test_raises_exception_when_already_processed(self, service, mock_db):
+        """Should raise SettlementAlreadyProcessedError if already in local DB."""
         draft = ClearingTransactionDraft(
             draft_id="test-draft-id",
             settlement_date=date(2024, 1, 20),
@@ -195,21 +193,24 @@ class TestCheckIfAlreadyProcessed:
             metadata={"expense_ids": [1, 2]},
         )
 
-        mock_client = MagicMock()
-        mock_client.__enter__.return_value = mock_client
-        mock_client.transaction_exists.return_value = True
-        mock_client_class.return_value = mock_client
+        # Insert a matching settlement record into the real DB
+        draft_hash = compute_draft_hash_from_draft(draft)
+        mock_db.save_processed_settlement(
+            ProcessedSettlement(
+                settlement_date=draft.settlement_date,
+                splitwise_group_id=123,
+                draft_hash=draft_hash,
+                ynab_transaction_id="existing-tx-id",
+            )
+        )
 
         with pytest.raises(SettlementAlreadyProcessedError) as exc_info:
             service.check_if_already_processed(draft)
 
         assert "2024-01-20" in str(exc_info.value)
 
-    @patch("ynab_split.service.YnabClient")
-    def test_does_not_raise_when_not_processed(
-        self, mock_client_class, service, sample_expenses
-    ):
-        """Should not raise exception if not already processed."""
+    def test_does_not_raise_when_not_processed(self, service):
+        """Should not raise exception if not in local DB."""
         draft = ClearingTransactionDraft(
             draft_id="test-draft-id",
             settlement_date=date(2024, 1, 20),
@@ -228,12 +229,7 @@ class TestCheckIfAlreadyProcessed:
             metadata={"expense_ids": [1, 2]},
         )
 
-        mock_client = MagicMock()
-        mock_client.__enter__.return_value = mock_client
-        mock_client.transaction_exists.return_value = False
-        mock_client_class.return_value = mock_client
-
-        # Should not raise
+        # Empty DB - should not raise
         service.check_if_already_processed(draft)
 
 

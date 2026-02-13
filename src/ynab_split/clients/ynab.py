@@ -138,9 +138,6 @@ class YnabClient:
             logger.error(error_msg)
             raise ValueError(error_msg)
 
-        # Generate import_id for idempotency (hash of draft_id)
-        import_id = self._generate_import_id(draft)
-
         # Build subtransactions (split lines)
         subtransactions = []
         for line in draft.split_lines:
@@ -152,15 +149,18 @@ class YnabClient:
             subtransactions.append(subtransaction)
 
         # Build main transaction
+        # No import_id: YNAB treats transactions with import_id as "imported",
+        # and won't auto-match two imports. Omitting it makes YNAB treat this
+        # as manually-entered, so it auto-matches when the real bank transaction
+        # arrives. We use our local draft_hash for idempotency instead.
         transaction = {
             "account_id": draft.account_id,
             "date": draft.settlement_date.isoformat(),
             "amount": draft.total_amount_milliunits,
             "payee_name": draft.payee_name,
             "memo": f"Splitwise settlement (draft: {draft.draft_id})",
-            "cleared": "uncleared",  # Leave uncleared so YNAB can auto-match
+            "cleared": "uncleared",
             "approved": True,
-            "import_id": import_id,
             "subtransactions": subtransactions,
         }
 

@@ -220,7 +220,8 @@ class SettlementService:
         """
         Check if a draft has already been processed (idempotency check).
 
-        Checks YNAB API directly rather than relying on local cache.
+        Uses local database (draft_hash) since we don't set import_id on YNAB
+        transactions (omitting import_id allows YNAB to auto-match with bank imports).
 
         Args:
             draft: The draft transaction to check
@@ -228,17 +229,12 @@ class SettlementService:
         Raises:
             SettlementAlreadyProcessedError: If the settlement has already been processed
         """
-        # Check YNAB directly for existing transaction
-        with YnabClient(self.settings.ynab_access_token) as client:
-            exists: bool = client.transaction_exists(
-                self.settings.ynab_budget_id, draft
+        draft_hash = compute_draft_hash_from_draft(draft)
+        if self.db.is_settlement_processed(draft_hash):
+            logger.info(
+                f"Draft already exists in local DB for settlement on {draft.settlement_date}"
             )
-
-            if exists:
-                logger.info(
-                    f"Draft already exists in YNAB for settlement on {draft.settlement_date}"
-                )
-                raise SettlementAlreadyProcessedError(str(draft.settlement_date))
+            raise SettlementAlreadyProcessedError(str(draft.settlement_date))
 
     def get_ynab_categories(self) -> list[YnabCategory]:
         """
