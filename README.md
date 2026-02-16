@@ -1,12 +1,16 @@
-# YnabSplit
+# YNAB Tools
+
+A collection of YNAB productivity tools.
+
+## Tools
+
+### `split` — Splitwise Settlement Clearing
 
 Automate YNAB clearing transactions from Splitwise settlements with GPT-powered categorization.
 
-## Problem Statement
+**Problem**: Shared expenses tracked in Splitwise are settled periodically via Venmo/bank transfer. The settlement shows up in YNAB as a **single** transaction, but represents many underlying expenses that should be categorized across multiple YNAB categories.
 
-Shared expenses tracked in Splitwise are settled periodically via Venmo/bank transfer. The settlement shows up in YNAB as a **single** transaction, but represents many underlying expenses that should be categorized across multiple YNAB categories.
-
-**YnabSplit** automates creation of a **clearing transaction** in YNAB that:
+**Solution**: Automatically creates a **clearing transaction** in YNAB that:
 - Has the same total amount/date/payee as the settlement (so bank import matches it later)
 - Is a **split transaction** where **one Splitwise expense = one split line** in YNAB
 - Correctly allocates category inflows/outflows per expense, while netting to the settlement total
@@ -31,8 +35,8 @@ Copy `.env.example` to `.env` and add your API keys:
 
 **3. Run:**
 ```bash
-ynab-split draft --categorize --review-all    # Preview (dry-run)
-ynab-split apply --categorize --review-all    # Create transaction
+ynab-tools split draft --categorize --review-all    # Preview (dry-run)
+ynab-tools split apply --categorize --review-all    # Create transaction
 ```
 
 ---
@@ -42,8 +46,8 @@ ynab-split apply --categorize --review-all    # Create transaction
 ### Commands
 
 ```bash
-ynab-split draft [OPTIONS]    # Preview transaction (dry-run)
-ynab-split apply [OPTIONS]    # Create transaction in YNAB
+ynab-tools split draft [OPTIONS]    # Preview transaction (dry-run)
+ynab-tools split apply [OPTIONS]    # Create transaction in YNAB
 ```
 
 **Development:**
@@ -57,13 +61,13 @@ make clear-cache    # Clear category mapping cache
 ### CLI Flags
 
 ```bash
-ynab-split draft [OPTIONS]
+ynab-tools split draft [OPTIONS]
   --categorize, -c       Enable GPT categorization
   --review, -r           Review low-confidence categories
   --review-all           Review ALL categories interactively
   --verbose, -v          Verbose logging
 
-ynab-split apply [OPTIONS]
+ynab-tools split apply [OPTIONS]
   --categorize, -c       Enable GPT categorization (default: True)
   --review-all           Review ALL categories interactively
   --yes, -y              Skip confirmation prompt
@@ -87,19 +91,23 @@ Manual corrections are cached for future runs.
 ### Project Structure
 
 ```
-src/ynab_split/
-├── cli.py                # Typer CLI with rich formatting
-├── service.py            # High-level business logic
-├── reconciler.py         # Rounding adjustment algorithm
-├── categorizer.py        # Cache-first GPT categorization
-├── mapper.py             # SQLite category mapping cache
-├── db.py                 # Database layer
-├── models.py             # Pydantic domain models
-├── ui.py                 # Interactive category selection
-└── clients/
-    ├── splitwise.py      # Splitwise API client
-    ├── ynab.py           # YNAB API client
-    └── openai_client.py  # OpenAI GPT-4o-mini wrapper
+src/ynab_tools/
+├── cli.py                # Root Typer CLI (registers tool sub-apps)
+├── config.py             # Shared settings from environment
+├── db.py                 # Shared SQLite database layer
+├── models.py             # Shared Pydantic domain models
+├── exceptions.py         # Shared exception classes
+├── clients/
+│   ├── splitwise.py      # Splitwise API client
+│   ├── ynab.py           # YNAB API client
+│   └── openai_client.py  # OpenAI GPT-4o-mini wrapper
+└── split/                # Splitwise settlement clearing tool
+    ├── cli.py            # split draft/apply commands
+    ├── service.py        # High-level business logic
+    ├── reconciler.py     # Rounding adjustment algorithm
+    ├── categorizer.py    # Cache-first GPT categorization
+    ├── mapper.py         # SQLite category mapping cache
+    └── ui.py             # Interactive category selection
 ```
 
 ### Component Diagram
@@ -107,13 +115,14 @@ src/ynab_split/
 ```mermaid
 graph TB
     subgraph "CLI Layer"
-        CLI[cli.py<br/>draft/apply commands]
-        UI[ui.py<br/>select_category_interactive<br/>confirm_category]
+        CLI[cli.py<br/>root app]
+        SplitCLI[split/cli.py<br/>draft/apply commands]
+        UI[split/ui.py<br/>select_category_interactive<br/>confirm_category]
     end
 
     subgraph "Service Layer"
         Service[SettlementService<br/>get_most_recent_processed_settlement<br/>fetch_expenses_after_settlement<br/>create_draft_transaction<br/>categorize_draft<br/>apply_draft]
-        Reconciler[reconciler.py<br/>compute_splits_with_adjustment<br/>determine_expected_total]
+        Reconciler[split/reconciler.py<br/>compute_splits_with_adjustment<br/>determine_expected_total]
         Categorizer[ExpenseCategorizer<br/>categorize_split_line<br/>categorize_all_split_lines]
     end
 
@@ -138,8 +147,9 @@ graph TB
         Models[models.py<br/>SplitwiseExpense<br/>ClearingTransactionDraft<br/>ProposedSplitLine<br/>YnabCategory<br/>ProcessedSettlement]
     end
 
-    CLI --> Service
-    CLI --> UI
+    CLI --> SplitCLI
+    SplitCLI --> Service
+    SplitCLI --> UI
     Service --> SplitwiseClient
     Service --> YnabClient
     Service --> Categorizer
@@ -162,7 +172,7 @@ graph TB
 ```mermaid
 sequenceDiagram
     actor User
-    participant CLI as cli.py<br/>draft/apply
+    participant CLI as split/cli.py<br/>draft/apply
     participant Service as SettlementService
     participant DB as Database<br/>(SQLite)
     participant SW as SplitwiseClient
@@ -170,11 +180,11 @@ sequenceDiagram
     participant Cat as ExpenseCategorizer
     participant Map as CategoryMapper
     participant GPT as CategoryClassifier
-    participant UI as ui.py
+    participant UI as split/ui.py
 
     Note over User,UI: SETTLEMENT SELECTION
 
-    User->>+CLI: ynab-split draft --categorize --review-all
+    User->>+CLI: ynab-tools split draft --categorize --review-all
     CLI->>+Service: get_recent_settlements(count=3)
     Service->>+SW: get_expenses(group_id, limit=1000)
     SW-->>-Service: expenses[]
@@ -274,9 +284,9 @@ sequenceDiagram
     CLI->>User: Display draft table
     deactivate CLI
 
-    Note over User,UI: APPLY (ynab-split apply)
+    Note over User,UI: APPLY (ynab-tools split apply)
 
-    User->>+CLI: ynab-split apply --categorize --review-all
+    User->>+CLI: ynab-tools split apply --categorize --review-all
     Note over CLI,YNAB: (Repeat selection + fetch + categorize + review)
     CLI->>User: Display draft, ask confirmation
 
@@ -301,7 +311,7 @@ sequenceDiagram
 
 ### Database Schema
 
-SQLite database at `~/.ynab_split/ynab_split.db`:
+SQLite database at `~/.ynab_tools/ynab_tools.db`:
 
 - **`processed_settlements`**: Tracks processed settlements (settlement_date, draft_hash, ynab_transaction_id) for auto-detection and idempotency
 - **`category_mappings`**: Caches expense description → category mappings (description, ynab_category_id, source, confidence)
@@ -346,7 +356,7 @@ make test           # Run tests (use -k for specific, --cov for coverage)
 **"This settlement was already processed"**
 - You've already applied this settlement. Delete the YNAB transaction manually, then:
   ```bash
-  sqlite3 ~/.ynab_split/ynab_split.db "DELETE FROM processed_settlements WHERE settlement_date = 'YYYY-MM-DD';"
+  sqlite3 ~/.ynab_tools/ynab_tools.db "DELETE FROM processed_settlements WHERE settlement_date = 'YYYY-MM-DD';"
   ```
 
 **Clear category cache:**
@@ -356,7 +366,7 @@ make clear-cache
 
 **Verbose logging:**
 ```bash
-ynab-split draft --verbose  # Shows DEBUG logs including HTTP requests
+ynab-tools split draft --verbose  # Shows DEBUG logs including HTTP requests
 ```
 
 By default, HTTP request logs are hidden. Use `--verbose` to see all network requests to Splitwise, YNAB, and OpenAI APIs.

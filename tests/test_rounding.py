@@ -1,12 +1,12 @@
-"""Exhaustive rounding error tests for YnabSplit."""
+"""Exhaustive rounding error tests for YNAB Tools split reconciler."""
 
 from datetime import datetime
 from decimal import Decimal
 
 import pytest
 
-from ynab_split.models import SplitwiseExpense, SplitwiseUserShare
-from ynab_split.reconciler import (
+from ynab_tools.models import SplitwiseExpense, SplitwiseUserShare
+from ynab_tools.split.reconciler import (
     RoundingError,
     compute_splits_with_adjustment,
     to_milliunits,

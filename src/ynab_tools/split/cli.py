@@ -1,4 +1,4 @@
-"""CLI for YnabSplit using Typer."""
+"""CLI commands for the Splitwise settlement clearing tool."""
 
 import logging
 import sys
@@ -7,11 +7,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import load_settings
-from .db import Database
-from .exceptions import SettlementAlreadyProcessedError
+from ..config import load_settings
+from ..db import Database
+from ..exceptions import SettlementAlreadyProcessedError
+from ..models import SplitwiseExpense
 from .mapper import CategoryMapper
-from .models import SplitwiseExpense
 from .service import SettlementService
 from .ui import (
     confirm_category,
@@ -20,8 +20,8 @@ from .ui import (
 )
 
 app = typer.Typer(
-    name="ynab-split",
-    help="Automate YNAB clearing transactions from Splitwise settlements",
+    name="split",
+    help="Create YNAB clearing transactions from Splitwise settlements",
 )
 
 console = Console()
@@ -224,7 +224,7 @@ def draft(
         console.print("\n[bold green]✓ Draft created successfully![/bold green]")
 
         # Build apply command with appropriate flags
-        apply_cmd = "ynab-split apply"
+        apply_cmd = "ynab-tools split apply"
         if categorize:
             apply_cmd += " --categorize"
         if review_all:
@@ -493,11 +493,6 @@ def status():
     """
     Show status of last processed settlement.
 
-    This command is not yet implemented (Phase 4).
+    This command is not yet implemented.
     """
     console.print("[yellow]The 'status' command is not yet implemented.[/yellow]")
-    console.print("[dim]This will be added in Phase 4 of the implementation.[/dim]")
-
-
-if __name__ == "__main__":
-    app()

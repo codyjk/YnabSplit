@@ -1,8 +1,13 @@
-"""Configuration management for YnabSplit."""
+"""Configuration management for YNAB Tools."""
 
+import shutil
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Legacy path for migration
+_LEGACY_DB_DIR = Path.home() / ".ynab_split"
+_LEGACY_DB_PATH = _LEGACY_DB_DIR / "ynab_split.db"
 
 
 class Settings(BaseSettings):
@@ -34,12 +39,19 @@ class Settings(BaseSettings):
     gpt_confidence_threshold: float = 0.9  # Flag for review if confidence < threshold
 
     # Database path
-    database_path: Path = Path.home() / ".ynab_split" / "ynab_split.db"
+    database_path: Path = Path.home() / ".ynab_tools" / "ynab_tools.db"
 
     def __init__(self, **kwargs):
-        """Initialize settings and create database directory if needed."""
+        """Initialize settings, migrate legacy DB if needed, and create dirs."""
         super().__init__(**kwargs)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        _migrate_legacy_db(self.database_path)
+
+
+def _migrate_legacy_db(new_path: Path) -> None:
+    """Auto-migrate database from ~/.ynab_split/ to ~/.ynab_tools/ if needed."""
+    if _LEGACY_DB_PATH.exists() and not new_path.exists():
+        shutil.copy2(_LEGACY_DB_PATH, new_path)
 
 
 def load_settings() -> Settings:

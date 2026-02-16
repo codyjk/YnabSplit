@@ -6,17 +6,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ynab_split.config import Settings
-from ynab_split.db import Database
-from ynab_split.exceptions import SettlementAlreadyProcessedError
-from ynab_split.models import (
+from ynab_tools.config import Settings
+from ynab_tools.db import Database
+from ynab_tools.exceptions import SettlementAlreadyProcessedError
+from ynab_tools.models import (
     ClearingTransactionDraft,
     ProcessedSettlement,
     ProposedSplitLine,
     SplitwiseExpense,
     SplitwiseUserShare,
 )
-from ynab_split.service import (
+from ynab_tools.split.service import (
     SettlementService,
     compute_draft_hash_from_draft,
 )
@@ -133,7 +133,7 @@ def sample_settlement():
 class TestGetRecentSettlements:
     """Tests for get_recent_settlements method."""
 
-    @patch("ynab_split.service.SplitwiseClient")
+    @patch("ynab_tools.split.service.SplitwiseClient")
     def test_returns_settlements_sorted_newest_first(
         self, mock_client_class, service, sample_settlement
     ):
@@ -160,7 +160,7 @@ class TestGetRecentSettlements:
         assert result[0].date > result[1].date
         mock_client.get_settlement_history.assert_called_once_with(123, count=2)
 
-    @patch("ynab_split.service.SplitwiseClient")
+    @patch("ynab_tools.split.service.SplitwiseClient")
     def test_returns_empty_list_when_no_settlements(self, mock_client_class, service):
         """Should return empty list when no settlements found."""
         mock_client = MagicMock()
@@ -239,7 +239,7 @@ class TestCheckIfAlreadyProcessed:
 class TestCreateDraftTransaction:
     """Tests for create_draft_transaction method."""
 
-    @patch("ynab_split.service.SplitwiseClient")
+    @patch("ynab_tools.split.service.SplitwiseClient")
     def test_creates_draft_with_correct_totals(
         self, mock_client_class, service, sample_expenses
     ):
@@ -256,7 +256,7 @@ class TestCreateDraftTransaction:
         assert len(draft.split_lines) == 2
         assert draft.settlement_date == date(2024, 1, 16)  # Latest expense date
 
-    @patch("ynab_split.service.SplitwiseClient")
+    @patch("ynab_tools.split.service.SplitwiseClient")
     def test_draft_has_deterministic_id(
         self, mock_client_class, service, sample_expenses
     ):
@@ -273,7 +273,7 @@ class TestCreateDraftTransaction:
         assert draft1.draft_id == draft2.draft_id
         assert len(draft1.draft_id) == 64  # SHA256 hex length
 
-    @patch("ynab_split.service.SplitwiseClient")
+    @patch("ynab_tools.split.service.SplitwiseClient")
     def test_split_lines_sum_equals_total(
         self, mock_client_class, service, sample_expenses
     ):
@@ -292,7 +292,7 @@ class TestCreateDraftTransaction:
 class TestFetchExpensesAfterSettlement:
     """Tests for fetch_expenses_after_settlement method."""
 
-    @patch("ynab_split.service.SplitwiseClient")
+    @patch("ynab_tools.split.service.SplitwiseClient")
     def test_fetches_expenses_with_datetime_filter(
         self, mock_client_class, service, sample_settlement, sample_expenses
     ):
@@ -309,7 +309,7 @@ class TestFetchExpensesAfterSettlement:
         assert call_args[1]["dated_after"] == sample_settlement.date
         assert isinstance(call_args[1]["dated_after"], datetime)
 
-    @patch("ynab_split.service.SplitwiseClient")
+    @patch("ynab_tools.split.service.SplitwiseClient")
     def test_filters_out_payment_transactions(
         self, mock_client_class, service, sample_settlement, sample_expenses
     ):

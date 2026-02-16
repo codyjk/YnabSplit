@@ -3,9 +3,9 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .clients.openai_client import CategoryClassifier
+from ..clients.openai_client import CategoryClassifier
+from ..models import ProposedSplitLine, YnabCategory
 from .mapper import CategoryMapper
-from .models import ProposedSplitLine, YnabCategory
 
 logger = logging.getLogger(__name__)
 

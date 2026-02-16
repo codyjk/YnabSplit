@@ -10,7 +10,7 @@ help: ## Show this help message
 
 install: clean ## Install to PATH (uninstalls old version first)
 	@echo "Uninstalling old version..."
-	@uv tool uninstall ynab-split 2>/dev/null || true
+	@uv tool uninstall ynab-tools 2>/dev/null || true
 	@echo "Installing fresh version..."
 	uv tool install --force --reinstall .
 	@echo "✓ Installation complete"
@@ -46,8 +46,8 @@ clean: ## Clean up build artifacts, cache, and installed tool
 	@echo "✓ Clean complete"
 
 clear-cache: ## Clear category mapping cache
-	@if [ -f ~/.ynab_split/ynab_split.db ]; then \
-		sqlite3 ~/.ynab_split/ynab_split.db "DELETE FROM category_mappings; VACUUM;"; \
+	@if [ -f ~/.ynab_tools/ynab_tools.db ]; then \
+		sqlite3 ~/.ynab_tools/ynab_tools.db "DELETE FROM category_mappings; VACUUM;"; \
 		echo "✓ Category mapping cache cleared"; \
 	else \
 		echo "No cache file found"; \

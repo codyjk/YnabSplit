@@ -1,1 +1,1 @@
-"""Test suite for YnabSplit."""
+"""Test suite for YNAB Tools."""

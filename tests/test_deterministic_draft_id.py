@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from ynab_split.service import compute_deterministic_draft_id
+from ynab_tools.split.service import compute_deterministic_draft_id
 
 
 def test_deterministic_draft_id_same_inputs():

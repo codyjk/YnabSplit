@@ -1,4 +1,4 @@
-"""Pydantic domain models for YnabSplit."""
+"""Pydantic domain models for YNAB Tools."""
 
 from datetime import date, datetime
 from decimal import Decimal

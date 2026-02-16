@@ -4,7 +4,7 @@ import hashlib
 import logging
 from decimal import ROUND_HALF_UP, Decimal
 
-from .models import ProposedSplitLine, SplitwiseExpense, SplitwisePayment
+from ..models import ProposedSplitLine, SplitwiseExpense, SplitwisePayment
 
 
 class RoundingError(Exception):

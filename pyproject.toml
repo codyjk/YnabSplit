@@ -1,7 +1,7 @@
 [project]
-name = "ynab-split"
+name = "ynab-tools"
 version = "0.1.0"
-description = "Automate YNAB clearing transactions from Splitwise settlements"
+description = "A collection of YNAB productivity tools"
 readme = "README.md"
 authors = [
     { name = "Cody Joseph Krainock", email = "me@codyjoseph.com" }
@@ -27,7 +27,7 @@ dev = [
 ]
 
 [project.scripts]
-ynab-split = "ynab_split.cli:app"
+ynab-tools = "ynab_tools.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]

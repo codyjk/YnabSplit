@@ -4,8 +4,8 @@ import logging
 from datetime import datetime
 from typing import Literal
 
-from .db import Database
-from .models import CategoryMapping
+from ..db import Database
+from ..models import CategoryMapping
 
 logger = logging.getLogger(__name__)
 

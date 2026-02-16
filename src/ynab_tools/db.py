@@ -1,4 +1,4 @@
-"""SQLite database operations for YnabSplit."""
+"""SQLite database operations for YNAB Tools."""
 
 import sqlite3
 from datetime import date, datetime

@@ -1,25 +1,25 @@
-"""Custom exceptions for YnabSplit."""
+"""Custom exceptions for YNAB Tools."""
 
 
-class YnabSplitError(Exception):
-    """Base exception for all YnabSplit errors."""
+class YnabToolsError(Exception):
+    """Base exception for all YNAB Tools errors."""
 
     pass
 
 
-class ConfigurationError(YnabSplitError):
+class ConfigurationError(YnabToolsError):
     """Raised when configuration is invalid or missing."""
 
     pass
 
 
-class SettlementNotFoundError(YnabSplitError):
+class SettlementNotFoundError(YnabToolsError):
     """Raised when no settlements are found in Splitwise."""
 
     pass
 
 
-class SettlementAlreadyProcessedError(YnabSplitError):
+class SettlementAlreadyProcessedError(YnabToolsError):
     """Raised when attempting to process a settlement that already exists in YNAB."""
 
     def __init__(self, settlement_date: str, message: str | None = None):
@@ -30,7 +30,7 @@ class SettlementAlreadyProcessedError(YnabSplitError):
         )
 
 
-class APIError(YnabSplitError):
+class APIError(YnabToolsError):
     """Base class for API-related errors."""
 
     pass
@@ -54,13 +54,13 @@ class OpenAIAPIError(APIError):
     pass
 
 
-class CategorizationError(YnabSplitError):
+class CategorizationError(YnabToolsError):
     """Raised when expense categorization fails."""
 
     pass
 
 
-class RoundingError(YnabSplitError):
+class RoundingError(YnabToolsError):
     """Raised when split line totals don't match settlement amount after adjustment."""
 
     pass

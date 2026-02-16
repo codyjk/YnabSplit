@@ -8,7 +8,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-from .models import YnabCategory
+from ..models import YnabCategory
 
 logger = logging.getLogger(__name__)
 

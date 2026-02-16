@@ -1,4 +1,4 @@
-"""YnabSplit - Automate YNAB clearing transactions from Splitwise settlements."""
+"""YNAB Tools - A collection of YNAB productivity tools."""
 
 __version__ = "0.1.0"
 
@@ -10,8 +10,8 @@ from .models import (
     SplitwiseExpense,
     SplitwiseUserShare,
 )
-from .reconciler import compute_splits_with_adjustment, to_milliunits
-from .service import SettlementService
+from .split.reconciler import compute_splits_with_adjustment, to_milliunits
+from .split.service import SettlementService
 
 __all__ = [
     "Settings",
