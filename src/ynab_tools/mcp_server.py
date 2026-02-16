@@ -36,11 +36,12 @@ You are managing YNAB Splitwise settlement clearing. Follow this workflow:
 3. DRAFT: Call create_draft to compute the split transaction.
    Show the user the draft with amounts and totals.
 
-4. CATEGORIZE: Call categorize_draft to assign categories via GPT + cache.
-   Review the results:
-   - High confidence (>=0.9): Accept automatically
-   - Low confidence (<0.9) or needs_review: Ask the user if the category looks right
-   - If user disagrees, call list_categories and update_category with their choice
+4. CATEGORIZE: Call categorize_draft to apply cached category mappings.
+   - Lines with cached categories are auto-assigned.
+   - For any UNCATEGORIZED lines, review the descriptions yourself and decide
+     the best YNAB category. Call list_categories if needed, then call
+     update_category for each line you categorize.
+   - If you're unsure about a category, ask the user.
 
 5. APPLY: Once all categories are confirmed, show the final draft and ask:
    "Ready to create this transaction in YNAB?"
@@ -210,33 +211,54 @@ def create_draft() -> str:
 
 @mcp_app.tool()
 def categorize_draft() -> str:
-    """Categorize all split lines in the current draft using GPT + cache.
+    """Apply cached category mappings to the current draft.
 
     Uses the draft stored from the previous create_draft call.
+    Lines with cached mappings get auto-categorized; uncached lines are
+    left uncategorized for Claude to handle via update_category.
     """
     try:
-        service = _ensure_service()
+        _ensure_service()
 
         if _state.draft is None:
             return "Error: No draft loaded. Call create_draft first."
+        if _state.db is None:
+            return "Error: Database not initialized."
 
-        draft = service.categorize_draft(_state.draft)
-        _state.draft = draft
+        mapper = CategoryMapper(_state.db)
+        categories = _state.service.get_ynab_categories() if _state.service else []
+        cat_lookup = {cat.id: cat for cat in categories}
 
-        lines = ["Categorized Draft:"]
-        for i, line in enumerate(draft.split_lines):
+        cached_count = 0
+        for line in _state.draft.split_lines:
+            mapping = mapper.get_cached_mapping(line.memo)
+            if mapping:
+                cat = cat_lookup.get(mapping.ynab_category_id)
+                line.category_id = mapping.ynab_category_id
+                line.category_name = (
+                    f"{cat.category_group_name} > {cat.name}" if cat else None
+                )
+                line.confidence = mapping.confidence
+                line.needs_review = False
+                cached_count += 1
+
+        lines = ["Categorized Draft (cache only):"]
+        for i, line in enumerate(_state.draft.split_lines):
             desc = line.memo.replace("Splitwise: ", "").split(" (exp_")[0]
-            cat = line.category_name or "Uncategorized"
-            conf = f"{line.confidence:.2f}" if line.confidence is not None else "—"
-            review = " [NEEDS REVIEW]" if line.needs_review else ""
-            lines.append(
-                f"  [{i}] {desc} | {_format_amount(line.amount_milliunits)} | "
-                f"{cat} (confidence: {conf}){review}"
-            )
+            if line.category_id:
+                cat_display = line.category_name or line.category_id
+                lines.append(
+                    f"  [{i}] {desc} | {_format_amount(line.amount_milliunits)} | {cat_display}"
+                )
+            else:
+                lines.append(
+                    f"  [{i}] {desc} | {_format_amount(line.amount_milliunits)} | "
+                    f"UNCATEGORIZED"
+                )
 
-        needs_review = sum(1 for sl in draft.split_lines if sl.needs_review)
+        uncategorized = len(_state.draft.split_lines) - cached_count
         lines.append("")
-        lines.append(f"{needs_review} of {len(draft.split_lines)} lines need review.")
+        lines.append(f"{cached_count} cached, {uncategorized} uncategorized.")
 
         return "\n".join(lines)
     except YnabToolsError as e:

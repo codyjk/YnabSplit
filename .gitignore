@@ -56,3 +56,4 @@ dmypy.json
 
 # uv
 uv.lock
+.mcp.json
