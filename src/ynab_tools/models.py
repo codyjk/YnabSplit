@@ -77,6 +77,36 @@ class YnabAccount(BaseModel):
     balance: int = 0  # milliunits
 
 
+class YnabTransaction(BaseModel):
+    """A YNAB transaction."""
+
+    id: str
+    date: date
+    amount: int  # milliunits
+    payee_name: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
+    account_id: str
+    account_name: str
+    memo: str | None = None
+    cleared: str  # "cleared", "uncleared", "reconciled"
+    approved: bool = False
+
+
+class YnabMonthCategory(BaseModel):
+    """A YNAB category's budget details for a specific month."""
+
+    id: str
+    name: str
+    category_group_name: str
+    budgeted: int  # milliunits
+    activity: int  # milliunits (negative = spending)
+    balance: int  # milliunits
+    goal_type: str | None = None  # "TB", "TBD", "MF", "NEED", "DEBT", etc.
+    goal_target: int | None = None  # milliunits
+    goal_percentage_complete: int | None = None
+
+
 # ============================================================================
 # Internal Models
 # ============================================================================

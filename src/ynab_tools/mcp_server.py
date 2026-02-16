@@ -2,9 +2,11 @@
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 from mcp.server.fastmcp import FastMCP
 
+from .clients.ynab import YnabClient
 from .config import load_settings
 from .db import Database
 from .exceptions import SettlementAlreadyProcessedError, YnabToolsError
@@ -58,6 +60,8 @@ class SessionState:
 
     service: SettlementService | None = None
     db: Database | None = None
+    ynab_client: YnabClient | None = None
+    budget_id: str | None = None
     settlements: list[SplitwiseExpense] = field(default_factory=list)
     expenses: list[SplitwiseExpense] = field(default_factory=list)
     draft: ClearingTransactionDraft | None = None
@@ -73,7 +77,17 @@ def _ensure_service() -> SettlementService:
         settings = load_settings()
         _state.db = Database(settings.database_path)
         _state.service = SettlementService(settings, _state.db)
+        _state.ynab_client = YnabClient(settings.ynab_access_token)
+        _state.budget_id = settings.ynab_budget_id
     return _state.service
+
+
+def _ensure_ynab() -> tuple[YnabClient, str]:
+    """Return (YnabClient, budget_id), initializing if needed."""
+    _ensure_service()
+    assert _state.ynab_client is not None
+    assert _state.budget_id is not None
+    return _state.ynab_client, _state.budget_id
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +427,160 @@ def get_status() -> str:
 
 
 # ---------------------------------------------------------------------------
-# MCP Prompt
+# Budget Analysis Tools
+# ---------------------------------------------------------------------------
+
+
+@mcp_app.tool()
+def get_transactions(
+    category_name: str | None = None,
+    account_name: str | None = None,
+    since_date: str | None = None,
+    payee: str | None = None,
+) -> str:
+    """Fetch transactions from YNAB with optional filters.
+
+    Args:
+        category_name: Filter to a specific YNAB category (by name, not ID).
+        account_name: Filter to a specific YNAB account (by name, not ID).
+        since_date: Only return transactions on or after this date (YYYY-MM-DD).
+                    Defaults to 3 months ago.
+        payee: Filter to transactions matching this payee name (case-insensitive substring).
+    """
+    try:
+        client, budget_id = _ensure_ynab()
+
+        # Resolve category name to ID
+        category_id: str | None = None
+        if category_name:
+            categories = client.get_categories(budget_id)
+            match = next(
+                (c for c in categories if c.name.lower() == category_name.lower()),
+                None,
+            )
+            if match is None:
+                return f"Error: No category found matching '{category_name}'."
+            category_id = match.id
+
+        # Resolve account name to ID
+        account_id: str | None = None
+        if account_name:
+            accounts = client.get_accounts(budget_id)
+            match_acc = next(
+                (a for a in accounts if a.name.lower() == account_name.lower()),
+                None,
+            )
+            if match_acc is None:
+                return f"Error: No account found matching '{account_name}'."
+            account_id = match_acc.id
+
+        # Default since_date to 3 months ago
+        if since_date is None:
+            since_date = (date.today() - timedelta(days=90)).isoformat()
+
+        transactions = client.get_transactions(
+            budget_id,
+            since_date=since_date,
+            account_id=account_id,
+            category_id=category_id,
+        )
+
+        # Client-side payee filter
+        if payee:
+            payee_lower = payee.lower()
+            transactions = [
+                t
+                for t in transactions
+                if t.payee_name and payee_lower in t.payee_name.lower()
+            ]
+
+        if not transactions:
+            return "No transactions found matching the filters."
+
+        lines = [f"Transactions ({len(transactions)} total):"]
+        for t in transactions:
+            lines.append(
+                f"  {t.date} | {t.payee_name or '(no payee)'} | "
+                f"{_format_amount(t.amount)} | {t.category_name or '(uncategorized)'} | "
+                f"{t.account_name}"
+            )
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Failed to fetch transactions: {e}"
+
+
+@mcp_app.tool()
+def get_monthly_budget(month: str | None = None) -> str:
+    """Fetch budget details for a specific month, grouped by category group.
+
+    Args:
+        month: Month in YYYY-MM-DD format (e.g. "2026-02-01"). Defaults to
+               the first day of the current month.
+    """
+    try:
+        client, budget_id = _ensure_ynab()
+
+        if month is None:
+            today = date.today()
+            month = today.replace(day=1).isoformat()
+
+        categories = client.get_month_budget(budget_id, month)
+
+        if not categories:
+            return f"No budget data found for {month}."
+
+        # Group by category group
+        grouped: dict[str, list] = {}
+        for cat in categories:
+            grouped.setdefault(cat.category_group_name, []).append(cat)
+
+        lines = [f"Budget for {month}:"]
+        for group_name in sorted(grouped):
+            lines.append(f"\n  {group_name}:")
+            for cat in sorted(grouped[group_name], key=lambda c: c.name):
+                goal_info = ""
+                if cat.goal_type:
+                    goal_info = f" | Goal: {cat.goal_type}"
+                    if cat.goal_target:
+                        goal_info += f" {_format_amount(cat.goal_target)}"
+                    if cat.goal_percentage_complete is not None:
+                        goal_info += f" ({cat.goal_percentage_complete}%)"
+                lines.append(
+                    f"    {cat.name}: "
+                    f"budgeted {_format_amount(cat.budgeted)} | "
+                    f"spent {_format_amount(cat.activity)} | "
+                    f"remaining {_format_amount(cat.balance)}"
+                    f"{goal_info}"
+                )
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Failed to fetch monthly budget: {e}"
+
+
+@mcp_app.tool()
+def list_accounts() -> str:
+    """List YNAB accounts (name, type, balance). Excludes closed accounts."""
+    try:
+        client, budget_id = _ensure_ynab()
+        accounts = client.get_accounts(budget_id)
+
+        open_accounts = [a for a in accounts if not a.closed]
+        if not open_accounts:
+            return "No open accounts found."
+
+        lines = [f"Accounts ({len(open_accounts)} open):"]
+        for a in sorted(open_accounts, key=lambda a: a.name):
+            lines.append(f"  {a.name} | {a.type} | {_format_amount(a.balance)}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Failed to list accounts: {e}"
+
+
+# ---------------------------------------------------------------------------
+# MCP Prompts
 # ---------------------------------------------------------------------------
 
 
@@ -421,6 +588,52 @@ def get_status() -> str:
 def split_workflow() -> str:
     """Orchestration instructions for processing Splitwise settlements."""
     return WORKFLOW_INSTRUCTIONS
+
+
+BUDGET_ANALYSIS_INSTRUCTIONS = """\
+You have access to YNAB budget data via three tools: get_transactions, \
+get_monthly_budget, and list_accounts. Use them to help with budget analysis.
+
+## Use Cases
+
+### 1. Category Breakdown (e.g. "Personal" spending)
+- Call get_transactions(category_name="Personal") to see all transactions.
+- Review descriptions and amounts.
+- Suggest which transactions might belong in more specific categories.
+
+### 2. Credit Card Optimization
+- Call list_accounts() to see all cards and their types.
+- Call get_transactions(account_name="Card Name") for each card to see \
+spending by category.
+- Compare spending patterns against typical card reward structures.
+- Suggest shifting spending to cards with better rewards for those categories.
+
+### 3. Goal / Budget Analysis
+- Call get_monthly_budget() for several recent months (e.g. current and \
+previous 2 months) to compare budgeted vs actual spending trends.
+- Identify categories that are consistently over or under budget.
+- Suggest goal adjustments based on actual spending patterns.
+
+### 4. Frivolous / Redundant Spending
+- Call get_monthly_budget() to identify discretionary categories.
+- Call get_transactions() for those categories to review individual purchases.
+- Ask the user about subscriptions or recurring charges that may be redundant.
+- Flag unusually large or frequent purchases for review.
+
+## Tips
+- Amounts are in milliunits (divide by 1000 for dollars). The tools format \
+these for you.
+- Activity (spending) is negative in YNAB. Formatted amounts use accounting \
+style: ($50.00) = outflow.
+- Default transaction window is 3 months. Use since_date for longer periods.
+- Always show specific numbers and examples when making recommendations.\
+"""
+
+
+@mcp_app.prompt()
+def budget_analysis() -> str:
+    """Guidance for using YNAB data tools for budget analysis."""
+    return BUDGET_ANALYSIS_INSTRUCTIONS
 
 
 # ---------------------------------------------------------------------------

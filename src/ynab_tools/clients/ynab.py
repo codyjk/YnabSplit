@@ -4,7 +4,13 @@ import logging
 
 import httpx
 
-from ..models import ClearingTransactionDraft, YnabAccount, YnabCategory
+from ..models import (
+    ClearingTransactionDraft,
+    YnabAccount,
+    YnabCategory,
+    YnabMonthCategory,
+    YnabTransaction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +113,98 @@ class YnabClient:
             accounts.append(account)
 
         return accounts
+
+    def get_transactions(
+        self,
+        budget_id: str,
+        since_date: str | None = None,
+        account_id: str | None = None,
+        category_id: str | None = None,
+    ) -> list[YnabTransaction]:
+        """
+        Get transactions for a budget.
+
+        Uses sub-endpoints when account_id or category_id is provided to avoid
+        fetching all transactions.
+
+        Args:
+            budget_id: The YNAB budget ID
+            since_date: Only return transactions on or after this date (ISO format)
+            account_id: Filter to a specific account
+            category_id: Filter to a specific category
+
+        Returns:
+            List of YNAB transactions
+        """
+        params: dict[str, str] = {}
+        if since_date:
+            params["since_date"] = since_date
+
+        if account_id:
+            url = f"/budgets/{budget_id}/accounts/{account_id}/transactions"
+        elif category_id:
+            url = f"/budgets/{budget_id}/categories/{category_id}/transactions"
+        else:
+            url = f"/budgets/{budget_id}/transactions"
+
+        response = self.client.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        transactions = []
+        for t in data["data"]["transactions"]:
+            transactions.append(
+                YnabTransaction(
+                    id=t["id"],
+                    date=t["date"],
+                    amount=t["amount"],
+                    payee_name=t.get("payee_name"),
+                    category_id=t.get("category_id"),
+                    category_name=t.get("category_name"),
+                    account_id=t["account_id"],
+                    account_name=t.get("account_name", ""),
+                    memo=t.get("memo"),
+                    cleared=t["cleared"],
+                    approved=t.get("approved", False),
+                )
+            )
+
+        return transactions
+
+    def get_month_budget(self, budget_id: str, month: str) -> list[YnabMonthCategory]:
+        """
+        Get per-category budget details for a specific month.
+
+        Args:
+            budget_id: The YNAB budget ID
+            month: Month in YYYY-MM-01 format (e.g. "2026-02-01")
+
+        Returns:
+            List of category budget details for the month
+        """
+        response = self.client.get(f"/budgets/{budget_id}/months/{month}")
+        response.raise_for_status()
+        data = response.json()
+
+        categories = []
+        for cat in data["data"]["month"]["categories"]:
+            if cat.get("hidden") or cat.get("deleted"):
+                continue
+            categories.append(
+                YnabMonthCategory(
+                    id=cat["id"],
+                    name=cat["name"],
+                    category_group_name=cat.get("category_group_name", ""),
+                    budgeted=cat["budgeted"],
+                    activity=cat["activity"],
+                    balance=cat["balance"],
+                    goal_type=cat.get("goal_type"),
+                    goal_target=cat.get("goal_target"),
+                    goal_percentage_complete=cat.get("goal_percentage_complete"),
+                )
+            )
+
+        return categories
 
     def create_transaction(
         self, budget_id: str, draft: ClearingTransactionDraft
