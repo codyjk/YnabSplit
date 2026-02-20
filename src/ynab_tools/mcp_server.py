@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from decimal import Decimal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -424,6 +425,56 @@ def get_status() -> str:
         return f"Error: {e}"
     except Exception as e:
         return f"Failed to get status: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Splitwise Write Tools
+# ---------------------------------------------------------------------------
+
+
+@mcp_app.tool()
+def add_splitwise_expense(
+    description: str,
+    amount: float,
+    expense_date: str | None = None,
+    paid_by_me: bool = True,
+) -> str:
+    """Add a new expense to Splitwise, split equally with your partner.
+
+    Args:
+        description: What the expense is for (e.g. "Lemonade Insurance").
+        amount: Total cost in dollars (e.g. 46.80).
+        expense_date: Date in YYYY-MM-DD format. Defaults to today.
+        paid_by_me: True if you paid (default). False if the other person paid.
+    """
+    try:
+        service = _ensure_service()
+
+        parsed_date = (
+            date.fromisoformat(expense_date) if expense_date is not None else None
+        )
+
+        expense_id, partner_name = service.add_expense_to_splitwise(
+            description=description,
+            amount=Decimal(str(amount)),
+            expense_date=parsed_date,
+            paid_by_me=paid_by_me,
+        )
+
+        half = round(amount / 2, 2)
+        payer = "You" if paid_by_me else partner_name
+        return (
+            f"Added to Splitwise!\n"
+            f"  Expense ID: {expense_id}\n"
+            f"  Description: {description}\n"
+            f"  Total: ${amount:.2f}  |  Each owes: ${half:.2f}\n"
+            f"  Paid by: {payer}\n"
+            f"  Split with: {partner_name}"
+        )
+    except YnabToolsError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Failed to add Splitwise expense: {e}"
 
 
 # ---------------------------------------------------------------------------

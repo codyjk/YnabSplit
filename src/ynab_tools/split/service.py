@@ -7,13 +7,14 @@ and reconciliation logic in a functional, immutable way.
 import hashlib
 import logging
 from datetime import date
+from decimal import Decimal
 
 from ..clients.openai_client import CategoryClassifier
 from ..clients.splitwise import SplitwiseClient
 from ..clients.ynab import YnabClient
 from ..config import Settings
 from ..db import Database
-from ..exceptions import SettlementAlreadyProcessedError
+from ..exceptions import SettlementAlreadyProcessedError, YnabToolsError
 from ..models import (
     ClearingTransactionDraft,
     ProcessedSettlement,
@@ -285,6 +286,57 @@ class SettlementService:
         )
 
         return draft
+
+    def add_expense_to_splitwise(
+        self,
+        description: str,
+        amount: Decimal,
+        expense_date: date | None = None,
+        paid_by_me: bool = True,
+    ) -> tuple[int, str]:
+        """Add a new expense to Splitwise, split equally between group members.
+
+        Args:
+            description: Expense description.
+            amount: Total cost in dollars.
+            expense_date: Date of the expense (defaults to today).
+            paid_by_me: True if the current user paid, False if the partner paid.
+
+        Returns:
+            Tuple of (new_expense_id, partner_name).
+
+        Raises:
+            YnabToolsError: If the group does not have exactly 2 members.
+        """
+        with SplitwiseClient(self.settings.splitwise_api_key) as client:
+            current_user_id = client.get_current_user()
+            members = client.get_group_members(self.settings.splitwise_group_id)
+
+        non_me = [m for m in members if m["id"] != current_user_id]
+        if len(non_me) != 1:
+            raise YnabToolsError(
+                f"Expected exactly 1 partner in group, found {len(non_me)}: {non_me}"
+            )
+        partner = non_me[0]
+
+        paid_by = current_user_id if paid_by_me else partner["id"]
+        split_with = partner["id"] if paid_by_me else current_user_id
+
+        with SplitwiseClient(self.settings.splitwise_api_key) as client:
+            expense_id = client.create_expense(
+                description=description,
+                cost=amount,
+                group_id=self.settings.splitwise_group_id,
+                paid_by_user_id=paid_by,
+                split_with_user_id=split_with,
+                expense_date=expense_date,
+            )
+
+        logger.info(
+            f"Created Splitwise expense #{expense_id}: {description} ${amount} "
+            f"(paid_by={paid_by}, split_with={split_with})"
+        )
+        return expense_id, partner["name"]
 
     def apply_draft(self, draft: ClearingTransactionDraft) -> str:
         """

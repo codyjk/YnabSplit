@@ -2,7 +2,8 @@
 
 import logging
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+from urllib.parse import urlencode
 
 import httpx
 
@@ -189,6 +190,83 @@ class SplitwiseClient:
             (exp.get_user_net(user_id) for exp in regular_expenses), Decimal("0")
         )
         return balance
+
+    def get_group_members(self, group_id: int) -> list[dict]:
+        """Get members of a Splitwise group.
+
+        Returns:
+            List of dicts with 'id' (int) and 'name' (str) for each member.
+        """
+        response = self.client.get(f"/get_group/{group_id}")
+        response.raise_for_status()
+        data = response.json()
+        members = []
+        for m in data.get("group", {}).get("members", []):
+            name = m.get("first_name", "")
+            last = m.get("last_name") or ""
+            if last:
+                name = f"{name} {last}"
+            members.append({"id": m["id"], "name": name.strip()})
+        return members
+
+    def create_expense(
+        self,
+        description: str,
+        cost: Decimal,
+        group_id: int,
+        paid_by_user_id: int,
+        split_with_user_id: int,
+        expense_date: date | None = None,
+        currency_code: str = "USD",
+    ) -> int:
+        """Create a new expense split equally between two users.
+
+        Args:
+            description: Expense description.
+            cost: Total cost (e.g., Decimal("46.80")).
+            group_id: Splitwise group ID.
+            paid_by_user_id: ID of the user who paid.
+            split_with_user_id: ID of the other user in the split.
+            expense_date: Date of the expense (defaults to today).
+            currency_code: ISO 4217 currency code.
+
+        Returns:
+            The new Splitwise expense ID.
+        """
+        half = (cost / 2).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        other_half = cost - half  # absorbs any rounding penny
+
+        params: dict[str, str] = {
+            "cost": str(cost),
+            "description": description,
+            "group_id": str(group_id),
+            "currency_code": currency_code,
+            "users__0__user_id": str(paid_by_user_id),
+            "users__0__paid_share": str(cost),
+            "users__0__owed_share": str(half),
+            "users__1__user_id": str(split_with_user_id),
+            "users__1__paid_share": "0.00",
+            "users__1__owed_share": str(other_half),
+        }
+        if expense_date:
+            params["date"] = expense_date.isoformat()
+
+        # Splitwise's users__N__* syntax requires form-encoded data.
+        # We bypass the client's default Content-Type: application/json by
+        # encoding the body manually and setting the header explicitly.
+        response = self.client.post(
+            "/create_expense",
+            content=urlencode(params).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        errors = data.get("errors", {})
+        if errors and any(errors.values()):
+            raise ValueError(f"Splitwise API error: {errors}")
+
+        return int(data["expenses"][0]["id"])
 
     def get_expenses_since_last_settlement(
         self, group_id: int, user_id: int
